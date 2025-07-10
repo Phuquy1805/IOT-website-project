@@ -7,3 +7,8 @@ Foundations for my web-based IOT project
 docker compose up --build --force-recreate
 ```
 * By default, the web is on localhost:9000
+# TO DO
+* IOT communication
+* Dashboard
+* Admin panel
+* Pretier CSS, better UI
