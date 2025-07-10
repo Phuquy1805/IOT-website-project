@@ -1,0 +1,104 @@
+# ========== Python backend (backend/) ==========
+
+backend/test
+backend/instance
+
+# Byte-compiled / optimized / DLL files
+backend/__pycache__/
+backend/*.py[cod]
+backend/*$py.class
+
+# C extensions
+backend/*.so
+
+# Distribution / packaging
+backend/.Python
+backend/build/
+backend/develop-eggs/
+backend/dist/
+backend/eggs/
+backend/parts/
+backend/sdist/
+backend/var/
+backend/wheels/
+backend/*.egg-info/
+backend/pip-wheel-metadata/
+
+# Installer logs
+backend/pip-log.txt
+
+# Unit test / coverage reports
+backend/htmlcov/
+backend/.tox/
+backend/.nox/
+backend/.coverage
+backend/.coverage.*
+backend/.cache
+backend/.pytest_cache/
+backend/nose2-junit-report.xml
+
+# Translations
+backend/*.mo
+backend/*.pot
+
+# Flask instance folder
+backend/instance/
+backend/.webassets-cache
+
+# SQL databases
+backend/*.sqlite3
+backend/*.db
+
+# Environment variables
+# backend/.env
+# backend/*.env
+
+# Mypy
+backend/.mypy_cache/
+backend/.dmypy.json
+
+# IDE/editor
+backend/.vscode/
+backend/.idea/
+backend/*.sublime-project
+backend/*.sublime-workspace
+
+# OS files
+backend/.DS_Store
+backend/Thumbs.db
+
+# ========== React frontend (frontend/) ==========
+# dependencies
+frontend/node_modules/
+
+# production build
+frontend/dist/
+frontend/build/
+
+# environment
+# frontend/.env
+# frontend/*.env.local
+# frontend/*.env.development.local
+# frontend/*.env.test.local
+# frontend/*.env.production.local
+
+# logs
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/pnpm-debug.log*
+
+# Vite cache
+frontend/.vite/
+frontend/.cache/
+
+# coverage
+frontend/coverage/
+
+# IDE/editor
+frontend/.vscode/
+frontend/.idea/
+
+# OS files
+frontend/.DS_Store
+frontend/Thumbs.db
