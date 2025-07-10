@@ -50,8 +50,8 @@ backend/*.sqlite3
 backend/*.db
 
 # Environment variables
-# backend/.env
-# backend/*.env
+backend/.env
+
 
 # Mypy
 backend/.mypy_cache/
@@ -76,11 +76,7 @@ frontend/dist/
 frontend/build/
 
 # environment
-# frontend/.env
-# frontend/*.env.local
-# frontend/*.env.development.local
-# frontend/*.env.test.local
-# frontend/*.env.production.local
+frontend/.env
 
 # logs
 frontend/npm-debug.log*
