@@ -1,4 +1,4 @@
-Foundations for my web-based IOT project
+
 
 # Run
 * Install and Open [Docker Desktop](https://www.docker.com/products/docker-desktop/)
@@ -8,7 +8,9 @@ docker compose up --build --force-recreate
 ```
 * By default, the web is on localhost:9000
 # TO DO
+* API encryption
 * IOT communication
+* Forget password mail
 * Dashboard
 * Admin panel
-* Pretier CSS, better UI
+* Prettier CSS, better UI
