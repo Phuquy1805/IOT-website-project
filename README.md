@@ -6,3 +6,4 @@ Foundations for my web-based IOT project
 ```bash
 docker compose up --build --force-recreate
 ```
+* By default, the web is on localhost:9000
