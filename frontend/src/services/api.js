@@ -16,8 +16,13 @@ export function authorize() {
 // ─── Authentication API ────────────────────────────────────────
 
 // register(username, email, password)
-export async function register(username, email, password) {
-  return API.post('/api/register', { username, email, password });
+export async function registerSendOTP(username, email, password) {
+  return API.post('/api/register/send-otp', { username, email, password });
+}
+
+// registerVerify(username, email, password, otp)
+export function registerVerify(username, email, password, otp) {
+  return API.post('/api/register/verify', { username, email, password, otp });
 }
 
 // login(email, password)

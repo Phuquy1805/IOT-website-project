@@ -1,12 +1,14 @@
 import os
 from flask_cors import CORS
-from datetime import timedelta
+from datetime import timedelta, datetime
+import secrets
 from dotenv import load_dotenv
 from flask_sqlalchemy import SQLAlchemy
 from flask import Flask, request, jsonify, make_response
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity, unset_jwt_cookies, set_access_cookies
 
+from utils.email import send_registration_email
 # Load environment variables
 load_dotenv()
 
@@ -46,28 +48,78 @@ class User(db.Model):
     def check_password(self, pw):
         return check_password_hash(self.password_hash, pw)
 
+class OTPRequest(db.Model):
+    id         = db.Column(db.Integer, primary_key=True)
+    email      = db.Column(db.String, index=True, nullable=False)
+    otp_code   = db.Column(db.String(6), nullable=False)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    used       = db.Column(db.Boolean, default=False)
+
+    @classmethod
+    def create(cls, email, db):
+        code = f"{secrets.randbelow(10**6):06d}"
+        expires = datetime.now() + timedelta(minutes=10)
+        otp = cls(email=email, otp_code=code, expires_at=expires)
+        db.session.add(otp)
+        db.session.commit()
+        return code
+
 # Create tables on startup
 def init_db():
     with app.app_context():
-        db.drop_all()  # Optional: drop all tables first
+        db.drop_all()  # REMEMBER TO DELETE THIS
         db.create_all()
 
 # Authentication routes
-@app.route('/api/register', methods=['POST'])
-def register():
+@app.route('/api/register/send-otp', methods=['POST'])
+def register_send_otp():
     data = request.get_json() or {}
-    u = data.get('username')
-    e = data.get('email')
-    p = data.get('password')
-    if not all([u, e, p]):
+    form_username = data.get('username')
+    form_email = data.get('email')
+    form_password = data.get('password')
+    if not all([form_username, form_email, form_password]):
         return jsonify(error='Missing fields'), 400
-    if User.query.filter((User.username == u) | (User.email == e)).first():
+    if User.query.filter((User.username == form_username) | (User.email == form_email)).first():
         return jsonify(error='User exists'), 409
-    user = User(username=u, email=e)
-    user.set_password(p)
+    code = OTPRequest.create(form_email, db)
+    send_registration_email(form_email, form_username ,code)
+    return jsonify(message='OTP sent'), 200
+
+
+
+@app.route('/api/register/verify', methods=['POST'])
+def register_verify():
+    data = request.get_json() or {}
+    form_username = data.get('username')
+    form_email = data.get('email')
+    form_password = data.get('password')
+    form_otp = data.get('otp')
+    if not all([form_username, form_email, form_password, form_otp]):
+        return jsonify(error='Missing fields'), 400 
+    if User.query.filter((User.username == form_username) | (User.email == form_email)).first():
+        return jsonify(error='User exists'), 409
+    
+    otp = OTPRequest.query.filter_by(
+        email=form_email, otp_code=form_otp, used=False
+    ).first()
+    if not otp or otp.expires_at < datetime.now():
+        return jsonify(error='Invalid or expired OTP'), 401
+
+    # mark this one used & create the user
+    otp.used = True
+    user = User(username=form_username, email=form_email)
+    user.set_password(form_password)
     db.session.add(user)
+
+    # --- CLEANUP: remove other expired or already-used OTPs for this email ---
+    OTPRequest.query.filter(
+        OTPRequest.email == form_email,
+        (OTPRequest.used == True) | (OTPRequest.expires_at < datetime.now())
+    ).delete(synchronize_session=False)
+
     db.session.commit()
-    return jsonify(message='Registered'), 201
+    return jsonify(message='Registration complete'), 201
+
 
 @app.route('/api/login', methods=['POST'])
 def login():

@@ -1,6 +1,6 @@
 // src/pages/Register.jsx
 import React, { useState } from 'react';
-import { register } from '../services/api';
+import { registerSendOTP } from '../services/api';
 import { validateUsername, validatePassword } from '../utils/validation';
 import { useNavigate, Link } from 'react-router-dom';
 
@@ -47,8 +47,8 @@ export default function Register() {
     }
 
     try {
-      await register(username, email, password);
-      navigate('/login');
+      await registerSendOTP(username, email, password);
+      navigate('/verify-OTP', { state: {username, email, password} });
     } catch (err) {
       setSubmitErr(err.response?.data?.error || 'Registration failed');
     }

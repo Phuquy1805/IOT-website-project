@@ -4,3 +4,4 @@ Flask-JWT-Extended
 flask-cors
 python-dotenv
 werkzeug
+resend
