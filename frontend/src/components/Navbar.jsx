@@ -26,12 +26,7 @@ export default function Navbar() {
             <li className="nav-item">
               <NavLink className="nav-link" to="/profile">Profile</NavLink>
             </li>
-            <li className="nav-item">
-              <NavLink className="nav-link" to="/change-password">Change Password</NavLink>
-            </li>
-            <li className="nav-item">
-              <NavLink className="nav-link" to="/admin">Admin</NavLink>
-            </li>
+            
           </ul>
           <button className="btn btn-outline-light" onClick={handleLogout}>
             Logout

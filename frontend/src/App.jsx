@@ -7,7 +7,6 @@ import ProtectedRoute from './components/ProtectedRoute';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
-import Admin from './pages/Admin';
 import Profile from './pages/Profile';
 import ChangePassword from './pages/ChangePassword';
 import VerifyOTP from './pages/VerifyOTP';
@@ -27,15 +26,6 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <Dashboard />
-              </ProtectedRoute>
-            }
-          />
-
-          <Route
-            path="/admin"
-            element={
-              <ProtectedRoute>
-                <Admin />
               </ProtectedRoute>
             }
           />
