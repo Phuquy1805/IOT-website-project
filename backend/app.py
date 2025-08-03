@@ -1,5 +1,6 @@
 import os
 from flask_cors import CORS
+from flask_mqtt import Mqtt
 from datetime import timedelta, datetime
 import secrets
 from dotenv import load_dotenv
@@ -14,6 +15,7 @@ load_dotenv()
 
 # Initialize Flask app
 app = Flask(__name__)
+
 CORS(app, resources={r"/api/*": {"origins": os.getenv('FRONT_END_URL')}}, supports_credentials=True)
 
 BACK_END_PORT = int(os.getenv('BACK_END_PORT', '8000'))
@@ -23,18 +25,24 @@ app.config['BACK_END_PORT'] = BACK_END_PORT
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URI', 'sqlite:///mydb.sqlite')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-app.config['JWT_TOKEN_LOCATION']       = ['cookies']
-app.config['JWT_ACCESS_COOKIE_PATH']   = '/api/'      # send access cookie on all /api/* calls
-app.config['JWT_COOKIE_SECURE']        = False         # True if you’re running HTTPS in prod
-app.config['JWT_COOKIE_SAMESITE']      = 'Lax'         # or 'Strict'
-app.config['JWT_COOKIE_CSRF_PROTECT']  = False         # set True + handle CSRF tokens if you like
+app.config['JWT_TOKEN_LOCATION'] = ['cookies']
+app.config['JWT_ACCESS_COOKIE_PATH'] = '/api/'
+app.config['JWT_COOKIE_SECURE'] = False        # True if HTTPS
+app.config['JWT_COOKIE_SAMESITE'] = 'Lax'
+app.config['JWT_COOKIE_CSRF_PROTECT'] = False
 app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY')
 ttl_seconds = int(os.getenv('JWT_ACCESS_TOKEN_EXPIRES', '3600'))
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(seconds=ttl_seconds)
 
+app.config['MQTT_BROKER_URL'] = os.getenv('MQTT_BROKER_URL')
+app.config['MQTT_BROKER_PORT'] = int(os.getenv('MQTT_BROKER_PORT', 1883))
+app.config['MQTT_KEEPALIVE'] = 60
+
+
 # Initialize extensions
 db  = SQLAlchemy(app)
 jwt = JWTManager(app)
+mqtt = Mqtt(app)
 
 # Define User model
 class User(db.Model):
@@ -69,6 +77,20 @@ def init_db():
     with app.app_context():
         db.drop_all()  # REMEMBER TO DELETE THIS
         db.create_all()
+
+# Fired on successful connect
+@mqtt.on_connect()
+def handle_connect(client, userdata, flags, rc):
+    mqtt.subscribe('/MSSV/camera-captures')            # start receiving
+    mqtt.subscribe('/MSSV/temperature')   
+
+# Fired on every incoming message
+@mqtt.on_message()
+def handle_mqtt_message(client, userdata, message):
+    topic   = message.topic
+    payload = message.payload.decode()
+    # app.logger.info(f"Received `{payload}` on `{topic}`")
+    # e.g. store in DB, forward via WebSocket, etc.
 
 # Authentication routes
 @app.route('/api/register/send-otp', methods=['POST'])

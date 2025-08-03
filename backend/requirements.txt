@@ -2,6 +2,7 @@ Flask
 Flask-SQLAlchemy
 Flask-JWT-Extended
 flask-cors
+flask-mqtt
 python-dotenv
 werkzeug
 resend
