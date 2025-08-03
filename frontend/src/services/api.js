@@ -51,3 +51,13 @@ export function changePassword(oldPassword, newPassword) {
     new_password: newPassword
   });
 }
+
+// ─── MQTT API ────────────────────────────────────────
+
+// returns { id, timestamp, url, description }
+export function getLatestCapture() {
+  return API.get('/api/captures/latest', {
+    headers: { 'Cache-Control': 'no-cache' }
+  });
+}
+

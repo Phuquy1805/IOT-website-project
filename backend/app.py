@@ -13,10 +13,8 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity, unset_jwt_cookies, set_access_cookies
 
 from utils.email import send_registration_email
-# Load environment variables
-load_dotenv()
 
-# Initialize Flask app
+load_dotenv()
 app = Flask(__name__)
 
 CORS(app, resources={r"/api/*": {"origins": os.getenv('FRONT_END_URL')}}, supports_credentials=True)
@@ -114,8 +112,6 @@ def handle_connect(client, userdata, flags, rc):
     mqtt.subscribe(MQTT_TOPIC_CAPTURE)            # start receiving
     mqtt.subscribe(MQTT_TOPIC_FINGERPRINT)   
 
-# Fired on every incoming message
-
 @mqtt.on_topic(MQTT_TOPIC_CAPTURE)
 def handle_capture_topic(client, userdata, message):
     # 1) Parse JSON
@@ -138,7 +134,7 @@ def handle_capture_topic(client, userdata, message):
     except (TypeError, ValueError) as e:
         app.logger.warning("Bad field types: %s | payload=%r", e, obj)
         return
-    
+
     # 4) Insert into DB
     with app.app_context():
         cap = Capture(timestamp=ts, url=url, description=desc)
@@ -271,7 +267,14 @@ def profile():
         return jsonify(error='User not found'), 404
     return jsonify(id=u.id, username=u.username, email=u.email), 200
 
-
+@app.route('/api/captures/latest', methods=['GET'])
+def latest_capture():
+    cap = Capture.get_last_capture()
+    if not cap:
+        return jsonify(error="No capture available"), 404
+    resp = jsonify(cap.to_dict())
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp, 200
 
 if __name__ == '__main__':
     init_db()
