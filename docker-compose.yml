@@ -1,4 +1,13 @@
 services:
+  mqtt:
+    build: 
+      context: ./mqtt
+      dockerfile: Dockerfile
+    container_name: mqtt
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mqtt/config:/mosquitto/config:ro
   backend:
     build:
       context: ./backend
