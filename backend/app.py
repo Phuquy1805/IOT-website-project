@@ -1,10 +1,13 @@
 import os
+import json
 from flask_cors import CORS
 from flask_mqtt import Mqtt
 from datetime import timedelta, datetime
 import secrets
 from dotenv import load_dotenv
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from flask import Flask, request, jsonify, make_response
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity, unset_jwt_cookies, set_access_cookies
@@ -37,7 +40,8 @@ app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(seconds=ttl_seconds)
 app.config['MQTT_BROKER_URL'] = os.getenv('MQTT_BROKER_URL')
 app.config['MQTT_BROKER_PORT'] = int(os.getenv('MQTT_BROKER_PORT', 1883))
 app.config['MQTT_KEEPALIVE'] = 60
-
+MQTT_TOPIC_CAPTURE = os.getenv('MQTT_TOPIC_CAPTURE')
+MQTT_TOPIC_FINGERPRINT= os.getenv('MQTT_TOPIC_FINGERPRINT') 
 
 # Initialize extensions
 db  = SQLAlchemy(app)
@@ -55,6 +59,32 @@ class User(db.Model):
         self.password_hash = generate_password_hash(pw)
     def check_password(self, pw):
         return check_password_hash(self.password_hash, pw)
+
+# Define Capture model to store captured images
+class Capture(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.Integer, nullable=False, index=True)
+    url = db.Column(db.String(2048), unique=True, nullable=False)
+    description = db.Column(db.String(255))
+    
+    def to_dict(self) -> dict:
+        return {"id": self.id, "timestamp": self.timestamp, "url": self.url, "description": self.description}
+    
+    @classmethod
+    def get_last_capture(cls) -> "Capture | None":
+        stmt = select(cls).order_by(cls.timestamp.desc()).limit(1)
+        return db.session.execute(stmt).scalar_one_or_none()
+    
+    @classmethod
+    def get_captures(cls, start_timestamp: int, end_timestamp: int) -> list["Capture"]:
+        if start_timestamp is None or end_timestamp is None:
+            raise ValueError("start_timestamp and end_timestamp are required")
+        if end_timestamp < start_timestamp:
+            raise ValueError("end_timestamp must be >= start_timestamp")
+
+        stmt = select(cls).where(cls.timestamp >= start_timestamp, cls.timestamp <= end_timestamp).order_by(cls.timestamp.asc(), cls.id.asc())
+        return list(db.session.execute(stmt).scalars().all())
+
 
 class OTPRequest(db.Model):
     id         = db.Column(db.Integer, primary_key=True)
@@ -75,22 +105,53 @@ class OTPRequest(db.Model):
 # Create tables on startup
 def init_db():
     with app.app_context():
-        db.drop_all()  # REMEMBER TO DELETE THIS
+        # db.drop_all()  # REMEMBER TO DELETE THIS
         db.create_all()
 
 # Fired on successful connect
 @mqtt.on_connect()
 def handle_connect(client, userdata, flags, rc):
-    mqtt.subscribe('/MSSV/camera-captures')            # start receiving
-    mqtt.subscribe('/MSSV/temperature')   
+    mqtt.subscribe(MQTT_TOPIC_CAPTURE)            # start receiving
+    mqtt.subscribe(MQTT_TOPIC_FINGERPRINT)   
 
 # Fired on every incoming message
-@mqtt.on_message()
-def handle_mqtt_message(client, userdata, message):
-    topic   = message.topic
-    payload = message.payload.decode()
-    # app.logger.info(f"Received `{payload}` on `{topic}`")
-    # e.g. store in DB, forward via WebSocket, etc.
+
+@mqtt.on_topic(MQTT_TOPIC_CAPTURE)
+def handle_capture_topic(client, userdata, message):
+    # 1) Parse JSON
+    try:
+        obj = json.loads(message.payload.decode("utf-8"))
+    except json.JSONDecodeError as e:
+        app.logger.warning("Invalid JSON on /MSSV/camera-captures: %s", e)
+        return
+
+    # 2) Validate required fields
+    if "timestamp" not in obj or "url" not in obj:
+        app.logger.warning("Missing required keys (timestamp, url): %r", obj)
+        return
+
+    # 3) Coerce types
+    try:
+        ts  = int(obj["timestamp"])
+        url = str(obj["url"])
+        desc = obj.get("description")
+    except (TypeError, ValueError) as e:
+        app.logger.warning("Bad field types: %s | payload=%r", e, obj)
+        return
+    
+    # 4) Insert into DB
+    with app.app_context():
+        cap = Capture(timestamp=ts, url=url, description=desc)
+        db.session.add(cap)
+        try:
+            db.session.commit()
+            app.logger.info("Stored capture id=%s url=%s", cap.id, cap.url)
+        except IntegrityError:
+            db.session.rollback()
+            app.logger.info("Duplicate capture (url) ignored: %s", url)
+        except Exception as e:
+            db.session.rollback()
+            app.logger.exception("DB insert failed: %s", e)
 
 # Authentication routes
 @app.route('/api/register/send-otp', methods=['POST'])
@@ -106,7 +167,6 @@ def register_send_otp():
     code = OTPRequest.create(form_email, db)
     send_registration_email(form_email, form_username ,code)
     return jsonify(message='OTP sent'), 200
-
 
 
 @app.route('/api/register/verify', methods=['POST'])

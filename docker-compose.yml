@@ -19,6 +19,8 @@ services:
       - ./backend/.env
     volumes:
       - ./backend:/app
+    depends_on:
+      - mqtt
   frontend:
     build:
       context: ./frontend
@@ -30,3 +32,4 @@ services:
       - ./frontend/.env
     depends_on:
       - backend
+      - mqtt
