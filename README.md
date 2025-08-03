@@ -7,6 +7,8 @@
 docker compose up --build --force-recreate
 ```
 * By default, the web is on localhost:9000
+# Note
+Change `mqttServer` in **esp32/main/main.ino** to your device's IP running docker.
 # TO DO
 * API encryption
 * IOT communication
@@ -14,3 +16,5 @@ docker compose up --build --force-recreate
 * Dashboard
 * Admin panel
 * Prettier CSS, better UI
+
+> Dont worry, I've rotated my ImgBB API key.
