@@ -41,11 +41,11 @@ const char* mqttServer = "YOUR_PC_LAN_IP"; // e.g. 192.168.x.x
 * Dashboard with latest captured image viewer which fetch images from Imgbb urls.
 
 # TO DO
+* Add captures' thumbnail
 * API encryption
 * IOT communication
 * Forget password mail
 * Dashboard
-* Admin panel
 * Prettier CSS, better UI
 
 > Dont worry, I've rotated my ImgBB API key.
