@@ -3,8 +3,8 @@
 
 # Run the project
 ## Backend .env setup
-* [!] Set valid **Resend** API Key on [Resend](https://resend.com).
-* [!] Point the backend to your MQTT host.
+* **[!]** Set valid **Resend** API Key on [Resend](https://resend.com).
+* **[!]** Point the backend to your MQTT host.
 ```c
 MQTT_BROKER_URL=YOUR_PC_LAN_IP; // e.g. 192.168.x.x
 ```
