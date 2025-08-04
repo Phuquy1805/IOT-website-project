@@ -10,6 +10,9 @@ import Dashboard from './pages/Dashboard';
 import Profile from './pages/Profile';
 import ChangePassword from './pages/ChangePassword';
 import VerifyOTP from './pages/VerifyOTP';
+import ActivityStatistics from './pages/ActivityStatistics';
+import ActivityCaptures from './pages/ActivityCaptures';
+import ActivityFingerprints from './pages/ActivityFingerprints';
 
 export default function App() {
   return (
@@ -44,6 +47,31 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <ChangePassword />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/activity/statistics"
+            element={
+              <ProtectedRoute>
+                <ActivityStatistics/>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/activity/captures"
+            element={
+              <ProtectedRoute>
+                <ActivityCaptures/>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/activity/fingerprints"
+            element={
+              <ProtectedRoute>
+                <ActivityFingerprints/>
               </ProtectedRoute>
             }
           />
