@@ -61,3 +61,9 @@ export function getLatestCapture() {
   });
 }
 
+export function getCaptures({ start, end, limit = 30, offset = 0, order = 'desc' }) {
+  return API.get('/api/captures', {
+    params: { start, end, limit, offset, order },
+    headers: { 'Cache-Control': 'no-cache' },
+  });
+}

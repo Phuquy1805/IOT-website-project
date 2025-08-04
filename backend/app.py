@@ -6,7 +6,7 @@ from datetime import timedelta, datetime
 import secrets
 from dotenv import load_dotenv
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
 from flask import Flask, request, jsonify, make_response
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -275,6 +275,40 @@ def latest_capture():
     resp = jsonify(cap.to_dict())
     resp.headers['Cache-Control'] = 'no-store'
     return resp, 200
+
+@app.route('/api/captures', methods=['GET'])
+def list_captures():
+    start = request.args.get('start', type=int)
+    end   = request.args.get('end',   type=int)
+    if start is None or end is None:
+        return jsonify(error="start and end are required"), 400
+    if end < start:
+        return jsonify(error="end must be >= start"), 400
+
+    limit  = request.args.get('limit',  default=30, type=int)
+    offset = request.args.get('offset', default=0,  type=int)
+    limit  = max(1, min(limit, 100))
+    offset = max(0, offset)
+    order  = request.args.get('order', 'desc').lower()  # 'asc' | 'desc'
+
+    base = select(Capture).where(
+        Capture.timestamp >= start, Capture.timestamp <= end
+    )
+    if order == 'asc':
+        base = base.order_by(Capture.timestamp.asc(), Capture.id.asc())
+    else:
+        base = base.order_by(Capture.timestamp.desc(), Capture.id.desc())
+
+    total = db.session.execute(
+        select(func.count()).select_from(base.subquery())
+    ).scalar_one()
+
+    page = db.session.execute(base.offset(offset).limit(limit)).scalars().all()
+    items = [c.to_dict() for c in page]
+    return jsonify({
+        "items": items, "total": total,
+        "start": start, "end": end, "limit": limit, "offset": offset
+    }), 200
 
 if __name__ == '__main__':
     init_db()
