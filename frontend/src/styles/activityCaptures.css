@@ -1,0 +1,10 @@
+.capture-row:hover {
+  background: rgba(13, 110, 253, 0.05);
+}
+.capture-thumb {
+  width: 44px;
+  height: 44px;
+  object-fit: cover;
+  border-radius: .5rem;
+  background: #e9ecef;
+}
