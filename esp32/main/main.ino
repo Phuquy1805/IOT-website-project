@@ -9,9 +9,9 @@
 
 // ================== YOUR SETTINGS ==================
 #define FLASH_LED_PIN 4
-const char* IMGBB_API_KEY = "09fa1f32fa763225884a61c1d90e810b";
+const char* IMGBB_API_KEY = "0123456789abcdef0123456789abcdef";
 
-const char* mqttServer = "192.168.1.3";
+const char* mqttServer = "192.168.1.5";  //!<------------------ REPLACE ME ------------------>!//
 int port = 1883;
 
 unsigned long lastCapture = 0;
@@ -100,7 +100,7 @@ void uploadAndPublish(const uint8_t* jpeg, size_t jpegLen) {
   struct tm tmInfo;
   localtime_r(&now, &tmInfo);
   char filename[32];
-  strftime(filename, sizeof(filename), "%Y%m%d_%H%M%S.jpg", &tmInfo);
+  strftime(filename, sizeof(filename), "%Y%m%d-%H%M%S", &tmInfo);
 
   // 2) Build small head/tail strings for multipart (binary body in the middle)
   const String boundary = "----ESP32Boundary";
@@ -157,6 +157,7 @@ void uploadAndPublish(const uint8_t* jpeg, size_t jpegLen) {
   }
 
   // 6) Parse and publish URL
+
   StaticJsonDocument<1024> doc;
   auto err = deserializeJson(doc, resp);
   if (err) {
@@ -166,7 +167,15 @@ void uploadAndPublish(const uint8_t* jpeg, size_t jpegLen) {
   const char* url = doc["data"]["display_url"];
   Serial.print("Image URL: "); Serial.println(url);
 
-  if (!mqttClient.publish("/MSSV/camera-captures", url, true)) {
+  StaticJsonDocument<256> j;
+  j["timestamp"]   = (uint32_t)now;
+  j["url"]  = url;
+  j["description"] = "Scheduled capture";
+
+  String payload;
+  serializeJson(j, payload);
+
+  if (!mqttClient.publish("/MSSV/camera-captures", payload.c_str(), true)) {
     Serial.println("MQTT publish failed");
   }
 }
@@ -176,7 +185,7 @@ void setup() {
 
   // ---------- WiFi first (prevents cam_task panic during WiFi scans) ----------
   WiFiManager wifiManager;
-  // wifiManager.resetSettings(); 
+  wifiManager.resetSettings(); 
   const char *apName = "SmartDoor-Access-Point";
 
   wifiManager.setAPCallback([](WiFiManager *myWiFiManager) {
