@@ -1,10 +1,17 @@
 .capture-row:hover {
   background: rgba(13, 110, 253, 0.05);
 }
-.capture-thumb {
+.capture-thumb-wrap {
   width: 44px;
   height: 44px;
-  object-fit: cover;
-  border-radius: .5rem;
   background: #e9ecef;
+  border-radius: .5rem;
+  overflow: hidden;       /* hide any overflow so it crops nicely */
+}
+
+.capture-thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;      /* fills the box & crops if needed */
+  display: block;         /* removes inline gap */
 }

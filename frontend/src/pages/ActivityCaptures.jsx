@@ -237,8 +237,8 @@ export default function ActivityCaptures() {
               onClick={() => { setActive(it); setImgLoading(true); openModal(); }}
             >
               {/* representative icon (or swap to a tiny <img> later) */}
-              <div className="d-inline-flex align-items-center justify-content-center rounded capture-thumb">
-                <i className="bi bi-image" />
+              <div className="capture-thumb-wrap d-inline-flex align-items-center justify-content-center rounded">
+                <img src={it.thumb_url || it.url} alt="" className="capture-thumb-img" loading="lazy" />
               </div>
 
               {/* main text block */}

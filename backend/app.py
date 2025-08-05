@@ -63,10 +63,11 @@ class Capture(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     timestamp = db.Column(db.Integer, nullable=False, index=True)
     url = db.Column(db.String(2048), unique=True, nullable=False)
+    thumb_url = db.Column(db.String(2048), unique=True)
     description = db.Column(db.String(255))
     
     def to_dict(self) -> dict:
-        return {"id": self.id, "timestamp": self.timestamp, "url": self.url, "description": self.description}
+        return {"id": self.id, "timestamp": self.timestamp, "url": self.url, "thumb_url": self.thumb_url , "description": self.description}
     
     @classmethod
     def get_last_capture(cls) -> "Capture | None":
@@ -130,6 +131,7 @@ def handle_capture_topic(client, userdata, message):
     try:
         ts  = int(obj["timestamp"])
         url = str(obj["url"])
+        thumb_url = str(obj["thumb_url"])
         desc = obj.get("description")
     except (TypeError, ValueError) as e:
         app.logger.warning("Bad field types: %s | payload=%r", e, obj)
@@ -137,7 +139,7 @@ def handle_capture_topic(client, userdata, message):
 
     # 4) Insert into DB
     with app.app_context():
-        cap = Capture(timestamp=ts, url=url, description=desc)
+        cap = Capture(timestamp=ts, url=url, thumb_url=thumb_url, description=desc)
         db.session.add(cap)
         try:
             db.session.commit()

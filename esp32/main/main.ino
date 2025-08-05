@@ -11,7 +11,7 @@
 #define FLASH_LED_PIN 4
 const char* IMGBB_API_KEY = "0123456789abcdef0123456789abcdef";
 
-const char* mqttServer = "192.168.1.5";  //!<------------------ REPLACE ME ------------------>!//
+const char* mqttServer = "192.168.1.14";  //!<------------------ REPLACE ME ------------------>!//
 int port = 1883;
 
 unsigned long lastCapture = 0;
@@ -165,11 +165,13 @@ void uploadAndPublish(const uint8_t* jpeg, size_t jpegLen) {
     return;
   }
   const char* url = doc["data"]["display_url"];
+  const char* thumbUrl = doc["data"]["thumb"]["url"];
   Serial.print("Image URL: "); Serial.println(url);
 
   StaticJsonDocument<256> j;
   j["timestamp"]   = (uint32_t)now;
   j["url"]  = url;
+  j["thumb_url"] = thumbUrl;
   j["description"] = "Scheduled capture";
 
   String payload;
