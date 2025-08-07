@@ -6,13 +6,15 @@ from datetime import timedelta, datetime
 import secrets
 from dotenv import load_dotenv
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import select, func
+from sqlalchemy import select, func, CheckConstraint, ForeignKey, Index
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import relationship
 from flask import Flask, request, jsonify, make_response
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity, unset_jwt_cookies, set_access_cookies
 
 from utils.email import send_registration_email
+from utils.topic import topic
 
 load_dotenv()
 app = Flask(__name__)
@@ -38,8 +40,16 @@ app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(seconds=ttl_seconds)
 app.config['MQTT_BROKER_URL'] = os.getenv('MQTT_BROKER_URL')
 app.config['MQTT_BROKER_PORT'] = int(os.getenv('MQTT_BROKER_PORT', 1883))
 app.config['MQTT_KEEPALIVE'] = 60
-MQTT_TOPIC_CAPTURE = os.getenv('MQTT_TOPIC_CAPTURE')
-MQTT_TOPIC_FINGERPRINT= os.getenv('MQTT_TOPIC_FINGERPRINT') 
+
+
+MQTT_TOPIC_CAPTURE              = topic("camera-captures")
+MQTT_TOPIC_FINGERPRINT_LOG      = topic("fingerprint", "log")
+MQTT_TOPIC_SERVO_LOG            = topic("servo", "log")
+MQTT_TOPIC_LCD_LOG              = topic("lcd", "log")
+MQTT_TOPIC_FINGERPRINT_COMMAND  = topic("fingerprint", "command")
+MQTT_TOPIC_SERVO_COMMAND        = topic("servo", "command")
+MQTT_TOPIC_LCD_COMMAND          = topic("lcd", "command")
+
 
 # Initialize extensions
 db  = SQLAlchemy(app)
@@ -101,6 +111,69 @@ class OTPRequest(db.Model):
         db.session.commit()
         return code
 
+class Command(db.Model):
+    
+    id            = db.Column(db.Integer, primary_key=True)
+    created_at    = db.Column(db.BigInteger, nullable=False, index=True)        # epoch seconds UTC
+    user_id       = db.Column(db.Integer, ForeignKey('user.id'), nullable=False)
+    command_type  = db.Column(db.String(32), nullable=False)                    # 'door.open' | 'door.close' | 'lcd.set'
+    topic         = db.Column(db.String(255), nullable=True)                    # e.g. '/MSSV/door'
+    payload       = db.Column(db.Text, nullable=True)                           # e.g. 'OPEN' or LCD text
+    status        = db.Column(db.String(16), nullable=False, default='sent')    # 'sent'|'error'
+    note          = db.Column(db.Text, nullable=True)                           # error detail, optional
+
+    user          = relationship("User", lazy="joined")
+
+    __table_args__ = (
+        CheckConstraint("status IN ('sent','error')", name="ck_command_status"),
+        Index("ix_command_user_created", "user_id", "created_at"),
+        Index("ix_command_type_created", "command_type", "created_at"),
+    )
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "created_at": self.created_at,
+            "user_id": self.user_id,
+            "command_type": self.command_type,
+            "topic": self.topic,
+            "payload": self.payload,
+            "status": self.status,
+            "note": self.note,
+        }
+
+class Log(db.Model):
+
+    id               = db.Column(db.Integer, primary_key=True)
+    created_at       = db.Column(db.BigInteger, nullable=False, index=True)
+    log_type         = db.Column(db.String(32), nullable=False)
+    description      = db.Column(db.Text, nullable=True)
+    payload          = db.Column(db.Text, nullable=True)
+    topic            = db.Column(db.String(255), nullable=True)
+    command_id       = db.Column(db.Integer, ForeignKey('command.id', ondelete="SET NULL"), nullable=True)
+    related_log_id   = db.Column(db.Integer, ForeignKey('log.id',     ondelete="SET NULL"), nullable=True)
+
+    command          = relationship("Command", lazy="joined")
+    related_log      = relationship("Log", remote_side=[id], lazy="joined")
+
+    __table_args__ = (
+        # at most one parent: command OR log (both NULL allowed)
+        CheckConstraint("(command_id IS NULL) OR (related_log_id IS NULL)", name="ck_log_at_most_one_parent"),
+        Index("ix_log_type_created", "log_type", "created_at"),
+    )
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "created_at": self.created_at,
+            "log_type": self.log_type,
+            "description": self.description,
+            "payload": self.payload,
+            "topic": self.topic,
+            "command_id": self.command_id,
+            "related_log_id": self.related_log_id,
+        }
+
 # Create tables on startup
 def init_db():
     with app.app_context():
@@ -111,7 +184,7 @@ def init_db():
 @mqtt.on_connect()
 def handle_connect(client, userdata, flags, rc):
     mqtt.subscribe(MQTT_TOPIC_CAPTURE)            # start receiving
-    mqtt.subscribe(MQTT_TOPIC_FINGERPRINT)   
+
 
 @mqtt.on_topic(MQTT_TOPIC_CAPTURE)
 def handle_capture_topic(client, userdata, message):
