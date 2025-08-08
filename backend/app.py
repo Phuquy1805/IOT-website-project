@@ -263,6 +263,38 @@ def handle_servo_log(client, userdata, message):
             db.session.rollback()
             app.logger.exception("DB insert failed: %s", e)
 
+# HANDLER CHO FINGERPRINT LOG 
+@mqtt.on_topic(MQTT_TOPIC_FINGERPRINT_LOG)
+def handle_fingerprint_log(client, userdata, message):
+    try:
+        obj = json.loads(message.payload.decode("utf-8"))
+    except json.JSONDecodeError:
+        app.logger.warning("Bad JSON on fingerprint/log")
+        return
+
+    if "created_at" not in obj or "log_type" not in obj:
+        app.logger.warning("Missing keys in fingerprint/log: %r", obj)
+        return
+
+    cmd_id = obj.get("command_id")
+
+    with app.app_context():
+        log = Log(
+            created_at     = int(obj["created_at"]),
+            log_type       = obj.get("log_type"),
+            description    = obj.get("description"),
+            payload        = obj.get("payload"),
+            topic          = MQTT_TOPIC_FINGERPRINT_LOG,
+            command_id     = cmd_id,
+        )
+        db.session.add(log)
+        try:
+            db.session.commit()
+            app.logger.info("Stored fingerprint log id=%s", log.id)
+        except Exception as e:
+            db.session.rollback()
+            app.logger.exception("DB insert failed for fingerprint log: %s", e)
+
 
 # POST /api/servo
 @app.route('/api/servo', methods=['POST'])
@@ -475,6 +507,50 @@ def list_captures():
         "items": items, "total": total,
         "start": start, "end": end, "limit": limit, "offset": offset
     }), 200
+
+#  ENDPOINT ĐỂ BẮT ĐẦU ĐĂNG KÍ VÂN TAY   
+@app.route('/api/fingerprint/register', methods=['POST'])
+@jwt_required()
+def fingerprint_register_command():
+    # 0) caller identity ----------------------------------------------------
+    try:
+        uid = int(get_jwt_identity() or -1)
+    except ValueError:
+        return jsonify(error='Invalid token identity'), 422
+
+    created_at   = int(datetime.utcnow().timestamp())
+    command_type = "fingerprint.enroll"
+
+    # 2) create row first, flush to get ID ----------------------------------
+    cmd = Command(
+        created_at   = created_at,
+        user_id      = uid,
+        command_type = command_type,
+        topic        = MQTT_TOPIC_FINGERPRINT_COMMAND,
+        status       = 'pending'
+    )
+    db.session.add(cmd)
+    db.session.flush()
+
+    # 3) build payload & publish -------------------------------------------
+    payload = json.dumps({"cmd_id": cmd.id, "action": "enroll"})
+    published_ok = mqtt.publish(MQTT_TOPIC_FINGERPRINT_COMMAND, payload, qos=1) # Dùng qos=1 để đảm bảo lệnh đến
+
+    # 4) finalise row -------------------------------------------------------
+    cmd.payload = payload
+    cmd.status  = 'sent' if published_ok else 'error'
+    cmd.note    = None   if published_ok else 'mqtt.publish() returned False'
+    db.session.commit()
+
+    return (
+        jsonify(
+            id      = cmd.id,
+            status  = cmd.status,
+            topic   = cmd.topic,
+            payload = cmd.payload
+        ),
+        200 if published_ok else 500
+    )
 
 if __name__ == '__main__':
     init_db()
