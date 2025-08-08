@@ -3,10 +3,15 @@
 #include "cam.h"
 #include "wifi_setup.h"
 #include "servo_setup.h"
+#include "lcd_setup.h"
 
 // ----- MQTT objects -----
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
+// ----- Servo object -----
+static DoorServo door(false);
+// ----- LCD object ------
+static LCD lcd;
 
 
 
@@ -46,14 +51,32 @@ inline void callback(char* topic, byte* payload, unsigned int len)
     Serial.printf("Topic: %s | Payload: %s\n", topic, msg.c_str());
 
     if (strcmp(topic, MQTT_TOPIC_SERVO_COMMAND) == 0) {
-        handleServoCommand(msg);
+      handleServoCommand(msg);
+    }
+
+    if (strcmp(topic, MQTT_TOPIC_LCD_COMMAND) == 0) {
+      handleLCDCommand(msg);
     }
 }
 
-inline void handleServoCommand(const String& jsonText)
-{
+inline void handleLCDCommand(const String& jsonText) {
+  Serial.print("Handling LCD command");
+
+  StaticJsonDocument<128> doc;
+  DeserializationError err = deserializeJson(doc, jsonText);
+  if (err) {
+      Serial.printf("Bad JSON in LCD command: %s\n", err.c_str());
+      return;                     // silently ignore
+  }
+  uint32_t cmdId  = doc["cmd_id"]    | 0;
+  String message = doc["message"] | "";
+
+  lcd.printMessage(message);
+}
+
+inline void handleServoCommand(const String& jsonText) {
   /* 1 — parse */
-    Serial.print("Handling servo command");
+  Serial.print("Handling servo command");
   StaticJsonDocument<128> doc;
   DeserializationError err = deserializeJson(doc, jsonText);
   if (err) {

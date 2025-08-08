@@ -9,17 +9,49 @@
 #define SERVO_OPEN_DEG   90
 #define SERVO_CLOSED_DEG  0
 
-class DoorServo {
-  public:
-    void begin() { servo.attach(SERVO_PIN); servo.write(SERVO_CLOSED_DEG); open = false; }
-    void openDoor()  { servo.write(SERVO_OPEN_DEG);   open = true; }
-    void closeDoor() { servo.write(SERVO_CLOSED_DEG); open = false; }
-    bool isOpen() const { return open; }
+class DoorServo{
+  //Attribute:
   private:
     Servo servo;
-    bool  open = false;
-};
+    bool open = false;
+  public:
+  //Constructor
+    DoorServo(){
+      servo.attach(SERVO_PIN);
+      servo.write(SERVO_CLOSED_DEG);
+      this->open = false;
+    }
 
-static DoorServo door;
+    DoorServo(bool open){
+      servo.attach(SERVO_PIN);
+      if(open){
+        servo.write(SERVO_OPEN_DEG);
+      }else{
+        servo.write(SERVO_CLOSED_DEG);
+      }
+      this->open = open;
+    }
+
+  //Method
+    void begin(){
+      servo.attach(SERVO_PIN);
+      servo.write(SERVO_CLOSED_DEG);
+      open = false;
+    }
+
+    void openDoor(){
+      servo.write(SERVO_OPEN_DEG);
+      open = true;
+    }
+
+    void closeDoor(){
+      servo.write(SERVO_CLOSED_DEG);
+      open = false;
+    }
+
+    bool isOpen() const{
+      return open;
+    }
+};
 
 #endif
