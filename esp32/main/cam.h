@@ -5,7 +5,7 @@
 #include <PubSubClient.h>
 #include "header.h"
 
-void cameraSetup()
+bool cameraSetup()
 {
   camera_config_t camera_config = {
       .pin_pwdn = 32,

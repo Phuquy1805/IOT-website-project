@@ -67,3 +67,11 @@ export function getCaptures({ start, end, limit = 30, offset = 0, order = 'desc'
     headers: { 'Cache-Control': 'no-cache' },
   });
 }
+
+// ─── Servo control ────────────────────────────────────────
+export function sendServoCommand(action) {
+  return API.post('/api/servo', { action });
+}
+// convenience
+export function openDoor()  { return sendServoCommand('open'); }
+export function closeDoor() { return sendServoCommand('close'); }

@@ -1,0 +1,58 @@
+.big-toggle {
+  display: inline-block;
+  user-select: none;
+}
+
+/* hide native checkbox */
+.big-toggle__input {
+  display: none;
+}
+
+/* track */
+.big-toggle__track {
+  display: inline-block;
+  width: 120px;
+  height: 60px;
+  background: #adb5bd;              /* closed (gray) */
+  border-radius: 34px;
+  position: relative;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+/* knob */
+.big-toggle__knob {
+  position: absolute;
+  top: 4px;
+  left: 4px;                        /* closed position */
+  width: 52px;
+  height: 52px;
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+  transition: left 0.2s;
+}
+
+/* OPEN state */
+.big-toggle--open .big-toggle__track {
+  background: #28a745;               /* green */
+}
+.big-toggle--open .big-toggle__knob {
+  left: 60px;                        /* open position */
+}
+
+/* disabled */
+.big-toggle--disabled .big-toggle__track {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* minimal label */
+.big-toggle__state {
+  margin-top: 10px;
+  font-size: 1.3rem;
+  color: #adb5bd;                    /* closed color */
+}
+.big-toggle--open .big-toggle__state {
+  color: #28a745;                    /* open color */
+}

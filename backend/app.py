@@ -116,8 +116,8 @@ class Command(db.Model):
     id            = db.Column(db.Integer, primary_key=True)
     created_at    = db.Column(db.BigInteger, nullable=False, index=True)        # epoch seconds UTC
     user_id       = db.Column(db.Integer, ForeignKey('user.id'), nullable=False)
-    command_type  = db.Column(db.String(32), nullable=False)                    # 'door.open' | 'door.close' | 'lcd.set'
-    topic         = db.Column(db.String(255), nullable=True)                    # e.g. '/MSSV/door'
+    command_type  = db.Column(db.String(32), nullable=False)                    # 'servo.open' | 'servo.close' | 'lcd.set'
+    topic         = db.Column(db.String(255), nullable=True)                    # e.g. '/MQTT_PREFIX/door'
     payload       = db.Column(db.Text, nullable=True)                           # e.g. 'OPEN' or LCD text
     status        = db.Column(db.String(16), nullable=False, default='sent')    # 'sent'|'error'
     note          = db.Column(db.Text, nullable=True)                           # error detail, optional
@@ -125,7 +125,7 @@ class Command(db.Model):
     user          = relationship("User", lazy="joined")
 
     __table_args__ = (
-        CheckConstraint("status IN ('sent','error')", name="ck_command_status"),
+        CheckConstraint("status IN ('sent','error','pending')", name="ck_command_status"),
         Index("ix_command_user_created", "user_id", "created_at"),
         Index("ix_command_type_created", "command_type", "created_at"),
     )
@@ -183,24 +183,24 @@ def init_db():
 # Fired on successful connect
 @mqtt.on_connect()
 def handle_connect(client, userdata, flags, rc):
-    mqtt.subscribe(MQTT_TOPIC_CAPTURE)            # start receiving
+    mqtt.subscribe(MQTT_TOPIC_CAPTURE)
+    mqtt.subscribe(MQTT_TOPIC_FINGERPRINT_LOG)
+    mqtt.subscribe(MQTT_TOPIC_SERVO_LOG)
+    mqtt.subscribe(MQTT_TOPIC_LCD_LOG)
 
 
 @mqtt.on_topic(MQTT_TOPIC_CAPTURE)
 def handle_capture_topic(client, userdata, message):
-    # 1) Parse JSON
     try:
         obj = json.loads(message.payload.decode("utf-8"))
     except json.JSONDecodeError as e:
-        app.logger.warning("Invalid JSON on /MSSV/camera-captures: %s", e)
+        app.logger.warning(f"Invalid JSON on {MQTT_TOPIC_CAPTURE}: %s", e)
         return
 
-    # 2) Validate required fields
     if "timestamp" not in obj or "url" not in obj:
         app.logger.warning("Missing required keys (timestamp, url): %r", obj)
         return
 
-    # 3) Coerce types
     try:
         ts  = int(obj["timestamp"])
         url = str(obj["url"])
@@ -210,7 +210,6 @@ def handle_capture_topic(client, userdata, message):
         app.logger.warning("Bad field types: %s | payload=%r", e, obj)
         return
 
-    # 4) Insert into DB
     with app.app_context():
         cap = Capture(timestamp=ts, url=url, thumb_url=thumb_url, description=desc)
         db.session.add(cap)
@@ -223,6 +222,98 @@ def handle_capture_topic(client, userdata, message):
         except Exception as e:
             db.session.rollback()
             app.logger.exception("DB insert failed: %s", e)
+
+@mqtt.on_topic(MQTT_TOPIC_SERVO_LOG)
+def handle_servo_log(client, userdata, message):
+    try:
+        obj = json.loads(message.payload.decode())
+    except json.JSONDecodeError:
+        app.logger.warning("Bad JSON on servo/log")
+        return
+
+    if "created_at" not in obj or "log_type" not in obj:
+        app.logger.warning("Missing keys in servo/log: %r", obj)
+        return
+
+    cmd_id  = obj.get("command_id")
+    rel_id  = obj.get("related_log_id")
+
+    if cmd_id and rel_id:
+        app.logger.warning(
+            "servo/log violates parent rule: BOTH command_id=%s AND related_log_id=%s",
+            cmd_id, rel_id
+        )
+        return
+
+    with app.app_context():
+        log = Log(
+            created_at     = int(obj["created_at"]),
+            log_type       = obj.get("log_type"),
+            description    = obj.get("description"),
+            payload        = obj.get("payload"),
+            topic          = obj.get("topic"),
+            command_id     = cmd_id,
+            related_log_id = rel_id,
+        )
+        db.session.add(log)
+        try:
+            db.session.commit()
+            app.logger.info("Stored servo log id=%s", log.id)
+        except Exception as e:
+            db.session.rollback()
+            app.logger.exception("DB insert failed: %s", e)
+
+
+# POST /api/servo
+@app.route('/api/servo', methods=['POST'])
+@jwt_required()
+def servo_command():
+    # 0) caller identity ----------------------------------------------------
+    try:
+        uid = int(get_jwt_identity() or -1)
+    except ValueError:
+        return jsonify(error='Invalid token identity'), 422
+
+    # 1) request body -------------------------------------------------------
+    data   = request.get_json() or {}
+    action = (data.get('action') or '').lower()
+    if action not in ('open', 'close'):
+        return jsonify(error="action must be 'open' or 'close'"), 400
+
+    created_at   = int(datetime.utcnow().timestamp())
+    command_type = f"servo.{action}"
+
+    # 2) create row first, flush to get ID ----------------------------------
+    cmd = Command(
+        created_at   = created_at,
+        user_id      = uid,
+        command_type = command_type,
+        topic        = MQTT_TOPIC_SERVO_COMMAND,
+        status       = 'pending'          # temporary
+    )
+    db.session.add(cmd)
+    db.session.flush()                    # allocates cmd.id without commit
+
+    # 3) build payload & publish -------------------------------------------
+    payload = json.dumps({"cmd_id": cmd.id, "action": action})
+    published_ok = mqtt.publish(MQTT_TOPIC_SERVO_COMMAND, payload, qos=0)
+
+    # 4) finalise row -------------------------------------------------------
+    cmd.payload = payload
+    cmd.status  = 'sent' if published_ok else 'error'
+    cmd.note    = None   if published_ok else 'mqtt.publish() returned False'
+    db.session.commit()
+
+    return (
+        jsonify(
+            id      = cmd.id,
+            status  = cmd.status,
+            topic   = cmd.topic,
+            payload = cmd.payload
+        ),
+        200 if published_ok else 500
+    )
+
 
 # Authentication routes
 @app.route('/api/register/send-otp', methods=['POST'])
