@@ -1,5 +1,6 @@
 import os
 import json
+import requests
 from flask_cors import CORS
 from flask_mqtt import Mqtt
 from datetime import timedelta, datetime
@@ -22,6 +23,8 @@ app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": os.getenv('FRONT_END_URL')}}, supports_credentials=True)
 
 BACK_END_PORT = int(os.getenv('BACK_END_PORT', '8000'))
+
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 app.config['BACK_END_PORT'] = BACK_END_PORT
 
@@ -475,6 +478,46 @@ def list_captures():
         "items": items, "total": total,
         "start": start, "end": end, "limit": limit, "offset": offset
     }), 200
+
+@app.route('/api/chat', methods=['POST'])
+def chat_with_gemini():
+    data = request.get_json()
+    user_message = data.get('message', '').lower()
+
+    prompt_intro = (
+        "Bạn là trợ lý ảo thông minh và hơi dâm của trang web điều khiển cửa thông minh vân tay từ xa. "
+        "Bạn sẽ trả lời các message theo yêu cầu nhưng kèm theo tính tình cảm và hẹn hò.\n"
+    )
+    prompt_open_door = (
+        "Nếu message của người dùng là một câu ra lệnh mở cửa chẳng hạn như: 'Mở cửa', 'Mở cửa đi', "
+        "'Bạn hãy mở cửa đi', 'Vui lòng mở cửa', thì bạn chỉ cần trả lời lại rằng "
+        "'Tôi sẽ mở cửa! Vui lòng đợi trong giây lát!'\n"
+    )
+    prompt_general = (
+        "Nếu message người dùng không là một câu ra lệnh mở cửa thì bạn cần trả lời message đó theo điều kiện sau:\n"
+        "Điều kiện 1: Câu trả lời không được format theo định dạng như Latex, Markdown,... Chỉ là text thông thường ;\n"
+        "Điều kiện 2: Trả lời ngắn gọn xúc tích không quá 200 từ ;\n"
+    )
+
+    full_prompt = f"{prompt_intro}{prompt_open_door}{prompt_general}Câu hỏi người dùng: \"{user_message}\""
+
+    url = url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GOOGLE_API_KEY}"
+    payload = {
+        "contents": [
+            {
+                "parts": [{"text": full_prompt}]
+            }
+        ]
+    }
+
+    try:
+        res = requests.post(url, json=payload)
+        res.raise_for_status()
+        reply = res.json()['candidates'][0]['content']['parts'][0]['text']
+        return jsonify({'reply': reply})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 
 if __name__ == '__main__':
     init_db()

@@ -75,3 +75,7 @@ export function sendServoCommand(action) {
 // convenience
 export function openDoor()  { return sendServoCommand('open'); }
 export function closeDoor() { return sendServoCommand('close'); }
+
+export function chatWithGemini(message) {
+  return API.post('/api/chat', { message });
+}
