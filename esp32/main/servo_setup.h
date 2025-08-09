@@ -4,7 +4,7 @@
 #include <ESP32Servo.h>
 
 #ifndef SERVO_PIN
-#define SERVO_PIN 14
+#define SERVO_PIN 4
 #endif
 #define SERVO_OPEN_DEG   90
 #define SERVO_CLOSED_DEG  0
