@@ -74,15 +74,19 @@ export function sendServoCommand(action) {
 }
 
 export function registerFingerprint() {
-    return API.post('/api/fingerprint/register'); 
+  return API.post('/api/fingerprint/register'); 
+}
+
+export function getFingerprints() { 
+  return API.get('/api/fingerprints'); 
+}
+
+export function deleteFingerprint(id) { 
+  return API.delete(`/api/fingerprints/${id}`); 
 }
 
 // convenience
 export function openDoor()  { return sendServoCommand('open'); }
 export function closeDoor() { return sendServoCommand('close'); }
-<<<<<<< HEAD
 
 
-export function registerFingerprint() { return API.post('/api/fingerprint/register'); }
-=======
->>>>>>> main

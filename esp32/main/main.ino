@@ -138,13 +138,20 @@ void handleFingerprintCommand(const String& jsonText) {
     return;
   }
   uint32_t cmdId  = doc["cmd_id"] | 0;
-  String   action = doc["action"] | "";
+  String action = doc["action"] | "";
 
   if (action.equalsIgnoreCase("enroll")) {
     Serial.println("Starting fingerprint enrollment process...");
     getFingerprintEnroll(cmdId);
   }
-  // You can add "check", "delete", etc. here if desired.
+
+  else if (action.equalsIgnoreCase("delete")) {
+    int id_to_delete = doc["id"] | -1;
+    if (id_to_delete != -1) {
+      Serial.printf("Starting fingerprint deletion for ID #%d...\n", id_to_delete);
+      deleteFingerprint(id_to_delete, cmdId);
+    }
+  }
 }
 
 // ==========================================
@@ -152,53 +159,100 @@ void handleFingerprintCommand(const String& jsonText) {
 // Returns new ID or error code
 // ==========================================
 uint8_t getFingerprintEnroll(uint32_t cmd_id) {
+  
+  // ----- Bước 1: Tìm ID còn trống -----
   int id = 1;
+  // Vòng lặp này chỉ dùng để tìm ID trống tiếp theo.
   while (finger.loadModel(id) == FINGERPRINT_OK) {
     id++;
-    if (id >= 20) { // simple cap; adjust to your capacity
-      publishFingerprintLog("enroll.error", "Fingerprint database is full.", "", cmd_id);
+    if (id >= 5) { // Đặt giới hạn dung lượng của cảm biến
+      const char* msg = "Fingerprint database is full.";
+      Serial.println(msg);
+      lcd.clear();
+      lcd.print("Memory Full!");
+      publishFingerprintLog("enroll.error", msg, "", cmd_id);
       return FINGERPRINT_PACKETRECIEVEERR;
     }
   }
+  // Tại đây, `id` chính là vị trí trống đầu tiên.
+  // Các dòng thông báo thành công đã được xóa khỏi đây.
 
-  Serial.printf("Enrolling ID #%d\n", id);
-  publishFingerprintLog("enroll.progress",
-                        "Enrolling new fingerprint. Please place your finger on the scanner.",
-                        String(id).c_str(),
-                        cmd_id);
+  // ----- Bước 2: Bắt đầu quá trình đăng ký cho ID đã tìm được -----
+  Serial.printf("Enrolling for ID #%d\n", id);
+  lcd.clear();
+  lcd.print("Place finger");
+  lcd.setCursor(0, 1);
+  lcd.printf("on scanner (ID:%d)", id);
+  publishFingerprintLog("enroll.progress", "Enrolling. Please place your finger on the scanner.", String(id).c_str(), cmd_id);
 
-  Serial.println("Waiting for finger to enroll...");
+  // Chờ lấy ảnh 1
   while (finger.getImage() != FINGERPRINT_OK);
-
   if (finger.image2Tz(1) != FINGERPRINT_OK) {
-    publishFingerprintLog("enroll.error", "Failed to capture first image.", "", cmd_id);
+    const char* msg = "Failed to capture first image.";
+    Serial.println(msg);
+    lcd.clear();
+    lcd.print("Capture Failed");
+    publishFingerprintLog("enroll.error", msg, "", cmd_id);
     return FINGERPRINT_PACKETRECIEVEERR;
   }
   Serial.println("Image 1 taken");
+  lcd.clear();
+  lcd.print("Remove finger");
   publishFingerprintLog("enroll.progress", "Image 1 captured. Please remove your finger.", "", cmd_id);
 
-  delay(2000);
+  delay(2000); // Chờ người dùng nhấc tay ra
   while (finger.getImage() != FINGERPRINT_NOFINGER);
 
+  // Chờ lấy ảnh 2
   Serial.println("Place same finger again");
+  lcd.clear();
+  lcd.print("Place finger");
+  lcd.setCursor(0, 1);
+  lcd.print("again");
   publishFingerprintLog("enroll.progress", "Please place the same finger again.", "", cmd_id);
 
   while (finger.getImage() != FINGERPRINT_OK);
-
   if (finger.image2Tz(2) != FINGERPRINT_OK) {
-    publishFingerprintLog("enroll.error", "Failed to capture second image.", "", cmd_id);
+    const char* msg = "Failed to capture second image.";
+    Serial.println(msg);
+    lcd.clear();
+    lcd.print("Capture Failed");
+    publishFingerprintLog("enroll.error", msg, "", cmd_id);
     return FINGERPRINT_PACKETRECIEVEERR;
   }
   Serial.println("Image 2 taken");
 
-  if (finger.createModel() != FINGERPRINT_OK || finger.storeModel(id) != FINGERPRINT_OK) {
-    publishFingerprintLog("enroll.error", "Failed to create or store model.", "", cmd_id);
+  // ----- Bước 3: Tạo model và lưu vào bộ nhớ -----
+  if (finger.createModel() != FINGERPRINT_OK) {
+    const char* msg = "Failed to create model.";
+    Serial.println(msg);
+    lcd.clear();
+    lcd.print("Create Failed");
+    publishFingerprintLog("enroll.error", msg, "", cmd_id);
     return FINGERPRINT_PACKETRECIEVEERR;
   }
 
+  if (finger.storeModel(id) != FINGERPRINT_OK) {
+    const char* msg = "Failed to store model.";
+    Serial.println(msg);
+    lcd.clear();
+    lcd.print("Store Failed");
+    publishFingerprintLog("enroll.error", msg, "", cmd_id);
+    return FINGERPRINT_PACKETRECIEVEERR;
+  }
+
+  // ----- Bước 4: Thông báo thành công (CHỈ THỰC HIỆN MỘT LẦN DUY NHẤT) -----
   Serial.printf("ID %d stored!\n", id);
-  publishFingerprintLog("enroll.success", "Successfully enrolled new fingerprint.", String(id).c_str(), cmd_id);
-  return id;
+  lcd.clear();
+  lcd.print("Success!");
+  lcd.setCursor(0, 1);
+  lcd.printf("Stored ID #%d", id);
+  
+  // Tạo payload JSON để gửi đi
+  String success_payload = "{\"id\":" + String(id) + "}";
+  publishFingerprintLog("enroll.success", "Successfully enrolled new fingerprint.", success_payload.c_str(), cmd_id);
+  
+  return id; // Trả về ID vừa đăng ký thành công
 }
 
 // // ==========================================
@@ -232,6 +286,21 @@ void checkFingerprintScanner() {
   door.closeDoor();
 }
 
+// THÊM HÀM MỚI ĐỂ XÓA VÂN TAY
+void deleteFingerprint(int id, uint32_t cmd_id) {
+    uint8_t result = finger.deleteModel(id);
+
+    String payload = "{\"id\":" + String(id) + "}";
+    
+    if (result == FINGERPRINT_OK) {
+        Serial.printf("Successfully deleted fingerprint ID #%d\n", id);
+        publishFingerprintLog("delete.success", "Fingerprint deleted successfully.", payload.c_str(), cmd_id);
+    } else {
+        Serial.printf("Failed to delete fingerprint. Error code: %d\n", result);
+        publishFingerprintLog("delete.error", "Failed to delete fingerprint.", payload.c_str(), cmd_id);
+    }
+}
+
 // ==========================================
 /* Publish fingerprint log via MQTT */
 // ==========================================
@@ -242,6 +311,12 @@ void publishFingerprintLog(const char* log_type, const char* description, const 
   logDoc["log_type"]   = log_type;
   logDoc["description"]= description;
   logDoc["payload"]    = payload;
+
+  // Gán payload trực tiếp, không bọc trong cặp nháy kép nữa
+  if (payload && strlen(payload) > 0) {
+    logDoc["payload"] = DeserializationError::Ok == deserializeJson(logDoc["payload"], payload) ? logDoc["payload"] : payload;
+  }
+  
   if (cmd_id > 0) {
     logDoc["command_id"] = cmd_id;
   }

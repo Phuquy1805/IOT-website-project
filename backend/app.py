@@ -62,6 +62,7 @@ class User(db.Model):
     username = db.Column(db.String(50), unique=True, nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(128), nullable=False)
+    fingerprints = relationship("Fingerprint", back_populates="user", cascade="all, delete-orphan")
 
     def set_password(self, pw):
         self.password_hash = generate_password_hash(pw)
@@ -173,6 +174,25 @@ class Log(db.Model):
             "command_id": self.command_id,
             "related_log_id": self.related_log_id,
         }
+    
+class Fingerprint(db.Model):
+    __tablename__ = 'fingerprint'
+    
+    id = db.Column(db.Integer, primary_key=True) # ID từ cảm biến (1-127)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    name = db.Column(db.String(100), nullable=True) # Tên gợi nhớ, vd: "Ngón trỏ của A"
+    created_at = db.Column(db.BigInteger, nullable=False)
+
+    user = relationship("User", back_populates="fingerprints")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "username": self.user.username if self.user else "N/A",
+            "name": self.name,
+            "created_at": self.created_at
+        }
 
 # Create tables on startup
 def init_db():
@@ -277,6 +297,8 @@ def handle_fingerprint_log(client, userdata, message):
         return
 
     cmd_id = obj.get("command_id")
+    log_type = obj.get("log_type", "")
+
 
     with app.app_context():
         log = Log(
@@ -309,6 +331,45 @@ def handle_fingerprint_log(client, userdata, message):
         return
 
     cmd_id = obj.get("command_id")
+    log_type = obj.get("log_type", "")
+
+    # Xử lý khi đăng ký thành công
+    if log_type == "enroll.success" and cmd_id:
+        try:
+            # Lấy fingerprint_id từ payload
+            payload_data = json.loads(obj.get("payload", "{}"))
+            fingerprint_id = int(payload_data.get("id"))
+
+            # Tìm command gốc để biết user nào đã yêu cầu
+            original_command = db.session.get(Command, cmd_id)
+            if original_command:
+                # Tạo bản ghi Fingerprint mới
+                new_fingerprint = Fingerprint(
+                    id=fingerprint_id,
+                    user_id=original_command.user_id,
+                    name=f"Vân tay #{fingerprint_id}", # Tên mặc định
+                    created_at=int(obj["created_at"])
+                )
+                db.session.add(new_fingerprint)
+                db.session.commit()
+                app.logger.info(f"Linked fingerprint ID {fingerprint_id} to user ID {original_command.user_id}")
+        except Exception as e:
+            db.session.rollback()
+            app.logger.error(f"Failed to create Fingerprint link: {e}")
+
+    # Xử lý khi xóa thành công
+    elif log_type == "delete.success" and cmd_id:
+        try:
+            payload_data = json.loads(obj.get("payload", "{}"))
+            fingerprint_id_to_delete = int(payload_data.get("id"))
+            
+            # Xóa bản ghi trong DB
+            Fingerprint.query.filter_by(id=fingerprint_id_to_delete).delete()
+            db.session.commit()
+            app.logger.info(f"Deleted fingerprint record ID {fingerprint_id_to_delete} from database.")
+        except Exception as e:
+            db.session.rollback()
+            app.logger.error(f"Failed to delete Fingerprint record: {e}")
 
     with app.app_context():
         log = Log(
@@ -377,6 +438,12 @@ def servo_command():
         200 if published_ok else 500
     )
 
+# GET /api/fingerprints - Lấy danh sách tất cả vân tay
+@app.route('/api/fingerprints', methods=['GET'])
+@jwt_required()
+def get_all_fingerprints():
+    fingerprints = Fingerprint.query.order_by(Fingerprint.id).all()
+    return jsonify([fp.to_dict() for fp in fingerprints]), 200
 
 @app.route('/api/fingerprint/register', methods=['POST'])
 @jwt_required()
@@ -420,7 +487,6 @@ def fingerprint_register_command():
         ),
         200 if published_ok else 500
     )
-
 
 
 # Authentication routes
@@ -627,6 +693,33 @@ def fingerprint_register_command():
         ),
         200 if published_ok else 500
     )
+
+# DELETE /api/fingerprints/<int:fingerprint_id> - Gửi lệnh xóa vân tay
+@app.route('/api/fingerprints/<int:fingerprint_id>', methods=['DELETE'])
+@jwt_required()
+def fingerprint_delete_command(fingerprint_id):
+    uid = int(get_jwt_identity())
+    
+    # Tạo command để theo dõi
+    cmd = Command(
+        created_at=int(datetime.utcnow().timestamp()),
+        user_id=uid,
+        command_type="fingerprint.delete",
+        topic=MQTT_TOPIC_FINGERPRINT_COMMAND,
+        status='pending'
+    )
+    db.session.add(cmd)
+    db.session.flush()
+
+    # Tạo payload và gửi MQTT
+    payload = json.dumps({"cmd_id": cmd.id, "action": "delete", "id": fingerprint_id})
+    published_ok = mqtt.publish(MQTT_TOPIC_FINGERPRINT_COMMAND, payload, qos=1)
+
+    cmd.payload = payload
+    cmd.status = 'sent' if published_ok else 'error'
+    db.session.commit()
+
+    return jsonify(message="Delete command sent."), 200 if published_ok else 500
 
 if __name__ == '__main__':
     init_db()

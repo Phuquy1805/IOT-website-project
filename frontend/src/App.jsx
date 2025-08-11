@@ -13,6 +13,7 @@ import VerifyOTP from './pages/VerifyOTP';
 import ActivityStatistics from './pages/ActivityStatistics';
 import ActivityCaptures from './pages/ActivityCaptures';
 import ActivityFingerprints from './pages/ActivityFingerprints';
+import FingerprintManager from './pages/FingerprintManager';
 
 export default function App() {
   return (
@@ -72,6 +73,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <ActivityFingerprints/>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/fingerprint-manager"
+            element={
+              <ProtectedRoute>
+                <FingerprintManager />
               </ProtectedRoute>
             }
           />
