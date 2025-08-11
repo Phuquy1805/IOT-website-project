@@ -65,6 +65,9 @@ class User(db.Model):
     email = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(128), nullable=False)
 
+    fingerprints = relationship("Fingerprint", back_populates="user", cascade="all, delete-orphan")
+
+
     def set_password(self, pw):
         self.password_hash = generate_password_hash(pw)
     def check_password(self, pw):
@@ -177,10 +180,12 @@ class Log(db.Model):
 class Fingerprint(db.Model):
     __tablename__ = 'fingerprint'
     
-    id = db.Column(db.Integer, primary_key=True) # ID từ cảm biến (1-127)
+    id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    name = db.Column(db.String(100), nullable=True) # Tên gợi nhớ, vd: "Ngón trỏ của A"
+    name = db.Column(db.String(100), nullable=True) 
     created_at = db.Column(db.BigInteger, nullable=False)
+
+    user = relationship("User", back_populates="fingerprints")
 
     def to_dict(self):
         return {
@@ -554,20 +559,6 @@ def register_send_otp():
     send_registration_email(form_email, form_username ,code)
     return jsonify(message='OTP sent'), 200
 
-# GET /api/fingerprints - Lấy danh sách tất cả vân tay
-@app.route('/api/fingerprints', methods=['GET'])
-@jwt_required()
-def get_all_fingerprints():
-    fingerprints = Fingerprint.query.order_by(Fingerprint.id).all()
-    count = len(fingerprints)
-    
-    # Gói dữ liệu vào một object
-    response_data = {
-        "items": [fp.to_dict() for fp in fingerprints],
-        "count": count,
-        "capacity": FINGERPRINT_MAX_CAPACITY
-    }
-    return jsonify(response_data), 200
 
 @app.route('/api/register/verify', methods=['POST'])
 def register_verify():

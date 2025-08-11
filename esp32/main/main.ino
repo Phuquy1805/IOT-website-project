@@ -275,7 +275,7 @@ void checkFingerprintScanner()
   if (finger.fingerSearch() != FINGERPRINT_OK)
   {
     Serial.println("Finger not found");
-    publishFingerprintLog("match.fail", "Fingerprint scan failed: not found.", "", 0);
+    publishFingerprintLog("match.fail", "Scan failed: not found.", "", 0);
     delay(1000);
     return;
   }
@@ -287,7 +287,7 @@ void checkFingerprintScanner()
   Serial.println(finger.confidence);
 
   String payload = "{\"id\":" + String(finger.fingerID) + ", \"confidence\":" + String(finger.confidence) + "}";
-  publishFingerprintLog("match.success", "Fingerprint match successful.", payload.c_str(), 0);
+  publishFingerprintLog("match.success", "Match successful.", payload.c_str(), 0);
 
   door.openDoor();
   delay(5000);
@@ -318,29 +318,23 @@ void deleteFingerprint(int id, uint32_t cmd_id)
 // ==========================================
 void publishFingerprintLog(const char *log_type, const char *description, const char *payload, uint32_t cmd_id)
 {
+  // Hiển thị thông báo lên LCD (nếu có)
   lcd.printMessage(description);
+
   StaticJsonDocument<256> logDoc;
   logDoc["created_at"] = (uint32_t)time(nullptr);
-  logDoc["log_type"] = log_type;
-  logDoc["description"] = description;
-  logDoc["payload"] = payload;
+  logDoc["log_type"]   = log_type;
+  logDoc["description"]= description;
+  logDoc["payload"]    = payload;
 
-  // Gán payload trực tiếp, không bọc trong cặp nháy kép nữa
-  if (payload && strlen(payload) > 0)
-  {
-    logDoc["payload"] = DeserializationError::Ok == deserializeJson(logDoc["payload"], payload) ? logDoc["payload"] : payload;
-  }
-
-  if (cmd_id > 0)
-  {
+  if (cmd_id > 0) {
     logDoc["command_id"] = cmd_id;
   }
 
   String output;
   serializeJson(logDoc, output);
 
-  if (!mqttClient.connected())
-  {
+  if (!mqttClient.connected()) {
     Serial.println("[FINGERPRINT LOG] MQTT not connected!");
     return;
   }
