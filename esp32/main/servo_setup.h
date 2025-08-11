@@ -20,6 +20,6 @@ class DoorServo {
     bool  open = false;
 };
 
-static DoorServo door;
+
 
 #endif

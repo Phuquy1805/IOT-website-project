@@ -4,21 +4,13 @@
 #include "wifi_setup.h"
 #include "servo_setup.h"
 #include "lcd_setup.h"
+#include "fingerprint_setup.h"
 
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include <time.h>
 
-// Fingerprint sensor libs
-#include <Adafruit_Fingerprint.h>
-#include <SoftwareSerial.h>
-
-// ----- AS608 wiring -----
-// Sensor RX -> ESP32 TX (GPIO 15)
-// Sensor TX -> ESP32 RX (GPIO 14)
-#define FINGERPRINT_RX 14  // to sensor TX
-#define FINGERPRINT_TX 15  // to sensor RX
 
 // SoftwareSerial for AS608
 SoftwareSerial softSerial(FINGERPRINT_RX, FINGERPRINT_TX);
@@ -27,6 +19,9 @@ Adafruit_Fingerprint finger = Adafruit_Fingerprint(&softSerial);
 // ----- MQTT objects -----
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
+
+static DoorServo door;
+static LCD lcd;
 
 // Topics (prefix comes from your build/env: MQTT_TOPIC_PREFIX)
 static const char MQTT_TOPIC_LCD_COMMAND[]        PROGMEM = "/" MQTT_TOPIC_PREFIX "/lcd/command";
@@ -50,7 +45,8 @@ void publishFingerprintLog(const char* log_type, const char* description, const 
 // ==========================================
 void mqttConnect() {
   while (!mqttClient.connected()) {
-    Serial.println("Attemping MQTT connection...");
+    Serial.print("Attemping MQTT connection...");
+    Serial.println(mqttServer);
     
     String clientId = "ESP32Client-" + String(random(0xffff), HEX);
     if (mqttClient.connect(clientId.c_str())) {
@@ -262,9 +258,7 @@ void publishFingerprintLog(const char* log_type, const char* description, const 
   Serial.printf("[FINGERPRINT LOG] Publish %s -> %s\n", output.c_str(), sent ? "OK" : "FAIL");
 }
 
-// ==========================================
-// setup
-// ==========================================
+
 void setup() {
   Serial.begin(115200);
   pinMode(SERVO_PIN, OUTPUT);
@@ -315,9 +309,9 @@ void loop() {
   mqttClient.loop();
   checkFingerprintScanner();
 
-  // unsigned long now = millis();
-  // if (now - lastCapture >= captureInterval) {
-  //   lastCapture = now;
-  //   cameraCapture(mqttClient);
-  // }
+  unsigned long now = millis();
+  if (now - lastCapture >= captureInterval) {
+    lastCapture = now;
+    cameraCapture(mqttClient);
+  }
 }
