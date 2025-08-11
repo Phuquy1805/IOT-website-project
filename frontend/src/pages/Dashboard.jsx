@@ -7,9 +7,9 @@ import ChatWidget from '../components/ChatWidget';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export default function Dashboard() {
-  const [doorOpen, setDoorOpen] = useState(false);
-  const [cooldown, setCooldown] = useState(false);
-  const [error, setError] = useState('');
+  const [doorOpen, setDoorOpen]   = useState(false);
+  const [cooldown, setCooldown]   = useState(false);
+  const [error, setError]         = useState('');
 
   
   const flipDoor = async () => {

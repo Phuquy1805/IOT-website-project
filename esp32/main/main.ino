@@ -185,9 +185,8 @@ uint8_t getFingerprintEnroll(uint32_t cmd_id)
   while (finger.loadModel(id) == FINGERPRINT_OK)
   {
     id++;
-    if (id >= FINGERPRINT_CAPACITY)
-    { // Đặt giới hạn dung lượng của cảm biến
-      const char *msg = "Fingerprint database is full.";
+    if (id >= FINGERPRINT_CAPACITY) { 
+      const char* msg = "Fingerprint database is full.";
       Serial.println(msg);
       publishFingerprintLog("enroll.error", msg, "", cmd_id);
       return FINGERPRINT_PACKETRECIEVEERR;
