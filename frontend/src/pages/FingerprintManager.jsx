@@ -3,12 +3,14 @@ import { getFingerprints, registerFingerprint, deleteFingerprint } from '../serv
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 
+const UPDATE_DELAY_MS = 5000; // 5 giây là một khoảng thời gian hợp lý
+
 export default function FingerprintManager() {
   const [fingerprints, setFingerprints] = useState([]);
   const [count, setCount] = useState(0);
   const [capacity, setCapacity] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [isRegistering, setIsRegistering] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const fetchFingerprints = useCallback(async () => {
     try {
@@ -28,39 +30,47 @@ export default function FingerprintManager() {
     fetchFingerprints();
   }, [fetchFingerprints]);
 
+  const scheduleUpdate = (actionType) => {
+    toast.info(`Thao tác ${actionType} đã được gửi. Đang chờ thiết bị xử lý...`);
+    
+    setTimeout(() => {
+      toast.info("Đang cập nhật lại danh sách...");
+      fetchFingerprints();
+      setIsProcessing(false); 
+    }, UPDATE_DELAY_MS);
+  };
+
   const handleRegister = async () => {
-    if (count >= capacity) {
+    if (capacity > 0 && count >= capacity) {
       toast.warn("Bộ nhớ vân tay đã đầy!");
       return;
     }
     
-    setIsRegistering(true);
-    toast.info("Gửi yêu cầu đến thiết bị... Vui lòng làm theo hướng dẫn trên LCD.", { autoClose: 15000 });
+    setIsProcessing(true); // Vô hiệu hóa tất cả các nút
+    
     try {
       await registerFingerprint();
-      setTimeout(fetchFingerprints, 20000); // Đợi thiết bị xử lý và fetch lại
+      scheduleUpdate('đăng ký'); // Lên lịch cập nhật
     } catch (error) {
       if (error.response && error.response.status === 409) {
         toast.error("Gửi yêu cầu thất bại: Bộ nhớ đã đầy.");
       } else {
         toast.error("Gửi yêu cầu đăng ký thất bại.");
       }
-    } finally {
-      setTimeout(() => setIsRegistering(false), 20000);
+      setIsProcessing(false); // Bật lại nút nếu có lỗi ngay lập tức
     }
   };
 
   const handleDelete = async (id) => {
     if (window.confirm(`Bạn có chắc muốn xóa vân tay ID #${id}?`)) {
+      setIsProcessing(true); // Vô hiệu hóa tất cả các nút
+      
       try {
-        toast.info(`Đang gửi yêu cầu xóa vân tay #${id}...`);
         await deleteFingerprint(id);
-        // Cập nhật UI ngay lập tức để có trải nghiệm tốt hơn
-        // Cần phải fetch lại để có số lượng chính xác
-        fetchFingerprints();
-        toast.success(`Đã gửi lệnh xóa vân tay #${id} thành công!`);
+        scheduleUpdate('xóa'); // Lên lịch cập nhật
       } catch (error) {
         toast.error(`Gửi yêu cầu xóa thất bại cho vân tay #${id}.`);
+        setIsProcessing(false); // Bật lại nút nếu có lỗi ngay lập tức
       }
     }
   };
@@ -109,7 +119,7 @@ export default function FingerprintManager() {
               </tr>
             </thead>
             <tbody>
-              {loading ? (
+              {loading && !isProcessing ? (
                 <tr><td colSpan="5" className="text-center p-5"><div className="spinner-border" role="status"><span className="visually-hidden">Loading...</span></div></td></tr>
               ) : fingerprints.length > 0 ? (
                 fingerprints.map(fp => (
@@ -122,6 +132,7 @@ export default function FingerprintManager() {
                       <button 
                         className="btn btn-danger btn-sm"
                         onClick={() => handleDelete(fp.id)}
+                        disabled={isProcessing}
                       >
                         Xóa
                       </button>
