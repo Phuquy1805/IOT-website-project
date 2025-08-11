@@ -50,6 +50,7 @@ MQTT_TOPIC_FINGERPRINT_COMMAND  = topic("fingerprint", "command")
 MQTT_TOPIC_SERVO_COMMAND        = topic("servo", "command")
 MQTT_TOPIC_LCD_COMMAND          = topic("lcd", "command")
 
+FINGERPRINT_MAX_CAPACITY = int(os.getenv('FINGERPRINT_MAX_CAPACITY', '5'))
 
 # Initialize extensions
 db  = SQLAlchemy(app)
@@ -408,11 +409,23 @@ def servo_command():
 @jwt_required()
 def get_all_fingerprints():
     fingerprints = Fingerprint.query.order_by(Fingerprint.id).all()
-    return jsonify([fp.to_dict() for fp in fingerprints]), 200
+    count = len(fingerprints)
+    
+    # Gói dữ liệu vào một object
+    response_data = {
+        "items": [fp.to_dict() for fp in fingerprints],
+        "count": count,
+        "capacity": FINGERPRINT_MAX_CAPACITY
+    }
+    return jsonify(response_data), 200
 
 @app.route('/api/fingerprint/register', methods=['POST'])
 @jwt_required()
 def fingerprint_register_command():
+    current_fingerprint_count = Fingerprint.query.count()
+    if current_fingerprint_count >= FINGERPRINT_MAX_CAPACITY:
+        return jsonify(error="Fingerprint capacity is full. Cannot add more."), 409
+    
     # 0) caller identity ----------------------------------------------------
     try:
         uid = int(get_jwt_identity() or -1)
@@ -435,7 +448,7 @@ def fingerprint_register_command():
 
     # 3) build payload & publish -------------------------------------------
     payload = json.dumps({"cmd_id": cmd.id, "action": "enroll"})
-    published_ok = mqtt.publish(MQTT_TOPIC_FINGERPRINT_COMMAND, payload, qos=1) # Dùng qos=1 để đảm bảo lệnh đến
+    published_ok = mqtt.publish(MQTT_TOPIC_FINGERPRINT_COMMAND, payload, qos=1)
 
     # 4) finalise row -------------------------------------------------------
     cmd.payload = payload

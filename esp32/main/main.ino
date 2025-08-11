@@ -11,6 +11,8 @@
 #include <ArduinoJson.h>
 #include <time.h>
 
+#define FINGERPRINT_CAPACITY 5
+
 
 // SoftwareSerial for AS608
 SoftwareSerial softSerial(FINGERPRINT_RX, FINGERPRINT_TX);
@@ -165,7 +167,7 @@ uint8_t getFingerprintEnroll(uint32_t cmd_id) {
   // Vòng lặp này chỉ dùng để tìm ID trống tiếp theo.
   while (finger.loadModel(id) == FINGERPRINT_OK) {
     id++;
-    if (id >= 5) { // Đặt giới hạn dung lượng của cảm biến
+    if (id >= FINGERPRINT_CAPACITY) { 
       const char* msg = "Fingerprint database is full.";
       Serial.println(msg);
       lcd.clear();
