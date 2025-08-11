@@ -3,14 +3,12 @@ import { getFingerprints, registerFingerprint, deleteFingerprint } from '../serv
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 
-const UPDATE_DELAY_MS = 5000; // 5 giây là một khoảng thời gian hợp lý
-
 export default function FingerprintManager() {
   const [fingerprints, setFingerprints] = useState([]);
   const [count, setCount] = useState(0);
   const [capacity, setCapacity] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [isRegistering, setIsRegistering] = useState(false);
 
   const fetchFingerprints = useCallback(async () => {
     try {
@@ -30,47 +28,38 @@ export default function FingerprintManager() {
     fetchFingerprints();
   }, [fetchFingerprints]);
 
-  const scheduleUpdate = (actionType) => {
-    toast.info(`Thao tác ${actionType} đã được gửi. Đang chờ thiết bị xử lý...`);
-    
-    setTimeout(() => {
-      toast.info("Đang cập nhật lại danh sách...");
-      fetchFingerprints();
-      setIsProcessing(false); 
-    }, UPDATE_DELAY_MS);
-  };
-
   const handleRegister = async () => {
+    // Kiểm tra lại ở client-side
     if (capacity > 0 && count >= capacity) {
       toast.warn("Bộ nhớ vân tay đã đầy!");
       return;
     }
     
-    setIsProcessing(true); // Vô hiệu hóa tất cả các nút
-    
+    setIsRegistering(true);
+    toast.info("Gửi yêu cầu đến thiết bị... Vui lòng làm theo hướng dẫn trên LCD.", { autoClose: 15000 });
     try {
       await registerFingerprint();
-      scheduleUpdate('đăng ký'); // Lên lịch cập nhật
+      setTimeout(fetchFingerprints, 20000); 
     } catch (error) {
       if (error.response && error.response.status === 409) {
         toast.error("Gửi yêu cầu thất bại: Bộ nhớ đã đầy.");
       } else {
         toast.error("Gửi yêu cầu đăng ký thất bại.");
       }
-      setIsProcessing(false); // Bật lại nút nếu có lỗi ngay lập tức
+    } finally {
+      setTimeout(() => setIsRegistering(false), 20000);
     }
   };
 
   const handleDelete = async (id) => {
     if (window.confirm(`Bạn có chắc muốn xóa vân tay ID #${id}?`)) {
-      setIsProcessing(true); // Vô hiệu hóa tất cả các nút
-      
       try {
+        toast.info(`Đang gửi yêu cầu xóa vân tay #${id}...`);
         await deleteFingerprint(id);
-        scheduleUpdate('xóa'); // Lên lịch cập nhật
+        fetchFingerprints(); // Tải lại để cập nhật count
+        toast.success(`Đã gửi lệnh xóa vân tay #${id} thành công!`);
       } catch (error) {
         toast.error(`Gửi yêu cầu xóa thất bại cho vân tay #${id}.`);
-        setIsProcessing(false); // Bật lại nút nếu có lỗi ngay lập tức
       }
     }
   };
@@ -81,12 +70,11 @@ export default function FingerprintManager() {
     <div className="container py-4">
       <ToastContainer position="top-right" autoClose={5000} hideProgressBar={false} />
       
-      {/* Header and Controls */}
       <div className="d-flex justify-content-between align-items-center mb-3">
-        <h3>Quản lý vân tay</h3>
+        <h3>Finger Mangery</h3>
         <div className="d-flex align-items-center gap-3">
           <span className={`fw-bold ${isFull ? 'text-danger' : 'text-muted'}`}>
-            Đã dùng: {count} / {capacity}
+            Used: {count} / {capacity > 0 ? capacity : '...'}
           </span>
           <button
             className="btn btn-primary"
@@ -98,7 +86,6 @@ export default function FingerprintManager() {
         </div>
       </div>
       
-      {/* Warning message when full */}
       {isFull && (
         <div className="alert alert-warning" role="alert">
           Bộ nhớ cảm biến vân tay đã đầy. Vui lòng xóa bớt vân tay cũ trước khi đăng ký mới.
@@ -119,7 +106,7 @@ export default function FingerprintManager() {
               </tr>
             </thead>
             <tbody>
-              {loading && !isProcessing ? (
+              {loading ? (
                 <tr><td colSpan="5" className="text-center p-5"><div className="spinner-border" role="status"><span className="visually-hidden">Loading...</span></div></td></tr>
               ) : fingerprints.length > 0 ? (
                 fingerprints.map(fp => (
@@ -132,7 +119,6 @@ export default function FingerprintManager() {
                       <button 
                         className="btn btn-danger btn-sm"
                         onClick={() => handleDelete(fp.id)}
-                        disabled={isProcessing}
                       >
                         Xóa
                       </button>
