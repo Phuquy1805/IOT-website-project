@@ -72,9 +72,17 @@ export function getCaptures({ start, end, limit = 30, offset = 0, order = 'desc'
 export function sendServoCommand(action) {
   return API.post('/api/servo', { action });
 }
+
+export function registerFingerprint() {
+    return API.post('/api/fingerprint/register'); 
+}
+
 // convenience
 export function openDoor()  { return sendServoCommand('open'); }
 export function closeDoor() { return sendServoCommand('close'); }
+<<<<<<< HEAD
 
 
 export function registerFingerprint() { return API.post('/api/fingerprint/register'); }
+=======
+>>>>>>> main

@@ -5,43 +5,57 @@
 #include <PubSubClient.h>
 #include "header.h"
 
-bool cameraSetup()
-{
+bool cameraSetup() {
+  bool has_psram = psramFound();
+  Serial.printf("PSRAM found: %s\n", has_psram ? "yes" : "no");
+
   camera_config_t camera_config = {
-      .pin_pwdn = 32,
-      .pin_reset = -1,
-      .pin_xclk = 0,
-      .pin_sccb_sda = 26,
-      .pin_sccb_scl = 27,
-      .pin_d7 = 35,
-      .pin_d6 = 34,
-      .pin_d5 = 39,
-      .pin_d4 = 36,
-      .pin_d3 = 21,
-      .pin_d2 = 19,
-      .pin_d1 = 18,
-      .pin_d0 = 5,
-      .pin_vsync = 25,
-      .pin_href = 23,
-      .pin_pclk = 22,
-      .xclk_freq_hz = 20000000,
-      .ledc_timer = LEDC_TIMER_0,
-      .ledc_channel = LEDC_CHANNEL_0,
-      .pixel_format = PIXFORMAT_JPEG,
-      .frame_size = FRAMESIZE_VGA, // start safer; change back to SVGA later if stable
-      .jpeg_quality = 20,
-      .fb_count = 1,                      // start with 1 for stability; can raise to 2 later
-      .fb_location = CAMERA_FB_IN_PSRAM,  // <— crucial on ESP32-CAM
-      .grab_mode = CAMERA_GRAB_WHEN_EMPTY // lighter on the scheduler
+    .pin_pwdn       = 32,
+    .pin_reset      = -1,
+    .pin_xclk       = 0,
+    .pin_sccb_sda   = 26,
+    .pin_sccb_scl   = 27,
+    .pin_d7         = 35,
+    .pin_d6         = 34,
+    .pin_d5         = 39,
+    .pin_d4         = 36,
+    .pin_d3         = 21,
+    .pin_d2         = 19,
+    .pin_d1         = 18,
+    .pin_d0         = 5,
+    .pin_vsync      = 25,
+    .pin_href       = 23,
+    .pin_pclk       = 22,
+    .xclk_freq_hz   = 20000000,
+    .ledc_timer     = LEDC_TIMER_0,
+    .ledc_channel   = LEDC_CHANNEL_0,
+    .pixel_format   = PIXFORMAT_JPEG,
+    // Defaults below are overwritten right after:
+    .frame_size     = FRAMESIZE_VGA,
+    .jpeg_quality   = 20,
+    .fb_count       = 1,
+    .fb_location    = CAMERA_FB_IN_PSRAM,
+    .grab_mode      = CAMERA_GRAB_WHEN_EMPTY
   };
 
-  esp_err_t err = esp_camera_init(&camera_config);
-  if (err != ESP_OK)
-  {
-    Serial.printf("Camera init failed: 0x%x\n", err);
-    return 0;
+  if (has_psram) {
+    camera_config.fb_location = CAMERA_FB_IN_PSRAM;
+    camera_config.fb_count    = 2;             // smoother if memory allows
+    camera_config.frame_size  = FRAMESIZE_SVGA;// or UXGA later
+  } else {
+    camera_config.fb_location = CAMERA_FB_IN_DRAM;
+    camera_config.fb_count    = 1;             // must be 1 in DRAM
+    camera_config.frame_size  = FRAMESIZE_VGA; // stay at VGA or lower
+    // Optional: increase compression a bit to save RAM/bandwidth
+    camera_config.jpeg_quality = 22;           // higher number = more compression
   }
-  return 1;
+
+  esp_err_t err = esp_camera_init(&camera_config);
+  if (err != ESP_OK) {
+    Serial.printf("Camera init failed: 0x%x\n", err);
+    return false;
+  }
+  return true;
 }
 
 
