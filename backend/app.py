@@ -1,6 +1,7 @@
 import os
 import json
 import requests
+import traceback
 from flask_cors import CORS
 from flask_mqtt import Mqtt
 from datetime import timedelta, datetime
@@ -12,7 +13,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import relationship
 from flask import Flask, request, jsonify, make_response
 from werkzeug.security import generate_password_hash, check_password_hash
-from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity, unset_jwt_cookies, set_access_cookies
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity, unset_jwt_cookies, set_access_cookies, verify_jwt_in_request
+from flask_jwt_extended.exceptions import NoAuthorizationError
 
 from utils.email import send_registration_email
 from utils.topic import topic
@@ -739,13 +741,13 @@ def chat_with_gemini():
     user_message = data.get('message', '').lower()
 
     prompt_intro = (
-        "Bạn là trợ lý ảo thông minh và hơi dâm của trang web điều khiển cửa thông minh vân tay từ xa. "
+        "Bạn là trợ lý ảo thông minh và rất dâm của trang web điều khiển cửa thông minh vân tay từ xa. "
         "Bạn sẽ trả lời các message theo yêu cầu nhưng kèm theo tính tình cảm và hẹn hò.\n"
     )
     prompt_open_door = (
-        "Nếu message của người dùng là một câu ra lệnh mở cửa chẳng hạn như: 'Mở cửa', 'Mở cửa đi', "
-        "'Bạn hãy mở cửa đi', 'Vui lòng mở cửa', thì bạn chỉ cần trả lời lại rằng "
-        "'Tôi sẽ mở cửa! Vui lòng đợi trong giây lát!'\n"
+        "Nếu message của người dùng là một câu ra lệnh mở cửa chẳng hạn như: 'Mở/Đóng cửa', 'Mở/Đóng cửa đi', "
+        "'Bạn hãy mở/đóng cửa đi', 'Vui lòng mở/đóng cửa', thì bạn chỉ cần trả lời lại rằng "
+        "'Tôi sẽ mở/đóng cửa! Vui lòng đợi trong giây lát!'\n"
     )
     prompt_general = (
         "Nếu message người dùng không là một câu ra lệnh mở cửa thì bạn cần trả lời message đó theo điều kiện sau:\n"
@@ -768,8 +770,40 @@ def chat_with_gemini():
         res = requests.post(url, json=payload)
         res.raise_for_status()
         reply = res.json()['candidates'][0]['content']['parts'][0]['text']
+
+        action = None
+        if reply.startswith("Tôi sẽ mở cửa"):
+            action = "open"
+        elif reply.startswith("Tôi sẽ đóng cửa"):
+            action = "close"
+
+        if action:
+            try:
+                verify_jwt_in_request(optional=True)
+                user_id = get_jwt_identity()
+            except NoAuthorizationError:
+                user_id = None
+
+            if not user_id:
+                return jsonify({'error': 'Missing or invalid JWT token'}), 401
+
+            servo_url = request.host_url.rstrip('/') + '/api/servo'
+            app.logger.info(f"Gửi lệnh tới servo: {servo_url}")
+
+            servo_resp = requests.post(
+                servo_url,
+                json={"action": action},
+                cookies=request.cookies
+            )
+
+            if servo_resp.status_code != 200:
+                return jsonify({'reply': reply, 'servo_error': servo_resp.json()}), 500
+        
         return jsonify({'reply': reply})
+    
     except Exception as e:
+        app.logger.error(f"Chat error: {str(e)}")
+        app.logger.error(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
 
