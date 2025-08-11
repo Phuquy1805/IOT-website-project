@@ -283,41 +283,6 @@ def handle_servo_log(client, userdata, message):
             db.session.rollback()
             app.logger.exception("DB insert failed: %s", e)
 
-# HANDLER CHO FINGERPRINT LOG 
-@mqtt.on_topic(MQTT_TOPIC_FINGERPRINT_LOG)
-def handle_fingerprint_log(client, userdata, message):
-    try:
-        obj = json.loads(message.payload.decode("utf-8"))
-    except json.JSONDecodeError:
-        app.logger.warning("Bad JSON on fingerprint/log")
-        return
-
-    if "created_at" not in obj or "log_type" not in obj:
-        app.logger.warning("Missing keys in fingerprint/log: %r", obj)
-        return
-
-    cmd_id = obj.get("command_id")
-    log_type = obj.get("log_type", "")
-
-
-    with app.app_context():
-        log = Log(
-            created_at     = int(obj["created_at"]),
-            log_type       = obj.get("log_type"),
-            description    = obj.get("description"),
-            payload        = obj.get("payload"),
-            topic          = MQTT_TOPIC_FINGERPRINT_LOG,
-            command_id     = cmd_id,
-        )
-        db.session.add(log)
-        try:
-            db.session.commit()
-            app.logger.info("Stored fingerprint log id=%s", log.id)
-        except Exception as e:
-            db.session.rollback()
-            app.logger.exception("DB insert failed for fingerprint log: %s", e)
-
-
 @mqtt.on_topic(MQTT_TOPIC_FINGERPRINT_LOG)
 def handle_fingerprint_log(client, userdata, message):
     try:
