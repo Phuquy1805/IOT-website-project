@@ -12,9 +12,9 @@
 
 // ================== YOUR SETTINGS ==================
 
-const char* IMGBB_API_KEY = "0123456789abcdef0123456789abcdef";
+const char* IMGBB_API_KEY = "dc4a619f11ee6e591eba5db7cb696557";
 
-const char* mqttServer = "172.20.10.2";  //!<------------------ REPLACE ME ------------------>!//
+const char* mqttServer = "192.168.1.6";  //!<------------------ REPLACE ME ------------------>!//
 int port = 1883;
 
 unsigned long lastCapture = 0;
