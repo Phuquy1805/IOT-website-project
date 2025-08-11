@@ -367,7 +367,6 @@ void setup()
   softSerial.begin(57600); // default baud for AS608
   delay(100);
   finger.begin(57600); // ensure lib uses same baud
-  finger.emptyDatabase();
 
   if (finger.verifyPassword())
   {
