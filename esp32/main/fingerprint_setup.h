@@ -12,6 +12,6 @@
 #define FINGERPRINT_RX 14  // to sensor TX
 #define FINGERPRINT_TX 15  // to sensor RX
 
-
+#define FINGERPRINT_CAPACITY 150
 
 #endif

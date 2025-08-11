@@ -85,6 +85,17 @@ export function deleteFingerprint(id) {
   return API.delete(`/api/fingerprints/${id}`); 
 }
 
+// ─── Set webhook ────────────────────────────────────────
+export const updateWebhook = (data) => {
+  console.log("SENDING WEBHOOK:", data);
+  return API.post('/api/webhook', data);
+};
+
+// ─── Chat box ────────────────────────────────────────
+export function chatWithGemini(message) {
+  return API.post('/api/chat', { message });
+}
+
 // convenience
 export function openDoor()  { return sendServoCommand('open'); }
 export function closeDoor() { return sendServoCommand('close'); }

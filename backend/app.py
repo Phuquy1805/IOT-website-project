@@ -1,5 +1,6 @@
 import os
 import json
+import requests
 from flask_cors import CORS
 from flask_mqtt import Mqtt
 from datetime import timedelta, datetime
@@ -41,6 +42,7 @@ app.config['MQTT_BROKER_URL'] = os.getenv('MQTT_BROKER_URL')
 app.config['MQTT_BROKER_PORT'] = int(os.getenv('MQTT_BROKER_PORT', 1883))
 app.config['MQTT_KEEPALIVE'] = 60
 
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 MQTT_TOPIC_CAPTURE              = topic("camera-captures")
 MQTT_TOPIC_FINGERPRINT_LOG      = topic("fingerprint", "log")
@@ -50,26 +52,24 @@ MQTT_TOPIC_FINGERPRINT_COMMAND  = topic("fingerprint", "command")
 MQTT_TOPIC_SERVO_COMMAND        = topic("servo", "command")
 MQTT_TOPIC_LCD_COMMAND          = topic("lcd", "command")
 
+FINGERPRINT_MAX_CAPACITY = int(os.getenv('FINGERPRINT_MAX_CAPACITY', '5'))
 
 # Initialize extensions
 db  = SQLAlchemy(app)
 jwt = JWTManager(app)
 mqtt = Mqtt(app)
 
-# Define User model
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(50), unique=True, nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(128), nullable=False)
-    fingerprints = relationship("Fingerprint", back_populates="user", cascade="all, delete-orphan")
 
     def set_password(self, pw):
         self.password_hash = generate_password_hash(pw)
     def check_password(self, pw):
         return check_password_hash(self.password_hash, pw)
 
-# Define Capture model to store captured images
 class Capture(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     timestamp = db.Column(db.Integer, nullable=False, index=True)
@@ -94,7 +94,6 @@ class Capture(db.Model):
 
         stmt = select(cls).where(cls.timestamp >= start_timestamp, cls.timestamp <= end_timestamp).order_by(cls.timestamp.asc(), cls.id.asc())
         return list(db.session.execute(stmt).scalars().all())
-
 
 class OTPRequest(db.Model):
     id         = db.Column(db.Integer, primary_key=True)
@@ -183,8 +182,6 @@ class Fingerprint(db.Model):
     name = db.Column(db.String(100), nullable=True) # Tên gợi nhớ, vd: "Ngón trỏ của A"
     created_at = db.Column(db.BigInteger, nullable=False)
 
-    user = relationship("User", back_populates="fingerprints")
-
     def to_dict(self):
         return {
             "id": self.id,
@@ -193,6 +190,33 @@ class Fingerprint(db.Model):
             "name": self.name,
             "created_at": self.created_at
         }
+
+class Webhook(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    url = db.Column(db.String(255), nullable=False)
+    created_at = db.Column(db.Integer, nullable=False)
+
+    def to_dict(self) -> dict:
+        return {"id": self.id, "user_id": self.user_id, "url": self.url, "created_at": self.created_at}
+    
+    @classmethod
+    def notify(self, content: str, timeout: float = 5.0, **extra) -> tuple[bool, int, str]:
+        """
+        POST JSON to this webhook.
+        Returns (ok, status_code, text).
+        Usage: wh.notify("🔔 Servo opened") or wh.notify("...", event="servo", action="open")
+        """
+        payload = {"content": content}
+        if extra:
+            payload.update(extra)
+        try:
+            r = requests.post(self.url, json=payload, timeout=timeout)
+            return (r.ok, r.status_code, r.text)
+        except Exception as e:
+            return (False, 0, str(e))
+    
+
 
 # Create tables on startup
 def init_db():
@@ -217,8 +241,8 @@ def handle_capture_topic(client, userdata, message):
         app.logger.warning(f"Invalid JSON on {MQTT_TOPIC_CAPTURE}: %s", e)
         return
 
-    if "timestamp" not in obj or "url" not in obj:
-        app.logger.warning("Missing required keys (timestamp, url): %r", obj)
+    if "timestamp" not in obj or "url" not in obj  or "thumb_url" not in obj:
+        app.logger.warning("Missing required keys (timestamp, url, thumb_url): %r", obj)
         return
 
     try:
@@ -258,6 +282,8 @@ def handle_servo_log(client, userdata, message):
     cmd_id  = obj.get("command_id")
     rel_id  = obj.get("related_log_id")
 
+    
+    
     if cmd_id and rel_id:
         app.logger.warning(
             "servo/log violates parent rule: BOTH command_id=%s AND related_log_id=%s",
@@ -282,9 +308,29 @@ def handle_servo_log(client, userdata, message):
         except Exception as e:
             db.session.rollback()
             app.logger.exception("DB insert failed: %s", e)
+        
+        if cmd_id:
+            original_command = db.session.get(Command, cmd_id)
+            if original_command:
+                wh = Webhook.query.filter_by(user_id=original_command.user_id).first()
+                if wh:
+                    ok, code, body = wh.notify(
+                        content=f"🔔 Servo log: {obj.get('log_type')}",
+                        event="servo.log",
+                        log_type=obj.get("log_type"),
+                        description=obj.get("description"),
+                        payload=obj.get("payload"),
+                        log_id=log.id,
+                        command_id=cmd_id,
+                    )
+                    if ok:
+                        app.logger.info(f"Sent webhook to {wh.url} for log #{log.id}")
+                    else:
+                        app.logger.error(f"Webhook failed ({code}): {body}")
 
 @mqtt.on_topic(MQTT_TOPIC_FINGERPRINT_LOG)
 def handle_fingerprint_log(client, userdata, message):
+    # 1) Parse JSON
     try:
         obj = json.loads(message.payload.decode("utf-8"))
     except json.JSONDecodeError:
@@ -295,48 +341,74 @@ def handle_fingerprint_log(client, userdata, message):
         app.logger.warning("Missing keys in fingerprint/log: %r", obj)
         return
 
-    cmd_id = obj.get("command_id")
+    cmd_id   = obj.get("command_id")
     log_type = obj.get("log_type", "")
 
-    # Xử lý khi đăng ký thành công
-    if log_type == "enroll.success" and cmd_id:
+    # Normalize payload -> dict
+    payload_raw = obj.get("payload")
+    payload_data = {}
+    if isinstance(payload_raw, dict):
+        payload_data = payload_raw
+    elif isinstance(payload_raw, str):
         try:
-            # Lấy fingerprint_id từ payload
-            payload_data = json.loads(obj.get("payload", "{}"))
-            fingerprint_id = int(payload_data.get("id"))
-
-            # Tìm command gốc để biết user nào đã yêu cầu
-            original_command = db.session.get(Command, cmd_id)
-            if original_command:
-                # Tạo bản ghi Fingerprint mới
-                new_fingerprint = Fingerprint(
-                    id=fingerprint_id,
-                    user_id=original_command.user_id,
-                    name=f"Vân tay #{fingerprint_id}", # Tên mặc định
-                    created_at=int(obj["created_at"])
-                )
-                db.session.add(new_fingerprint)
-                db.session.commit()
-                app.logger.info(f"Linked fingerprint ID {fingerprint_id} to user ID {original_command.user_id}")
-        except Exception as e:
-            db.session.rollback()
-            app.logger.error(f"Failed to create Fingerprint link: {e}")
-
-    # Xử lý khi xóa thành công
-    elif log_type == "delete.success" and cmd_id:
-        try:
-            payload_data = json.loads(obj.get("payload", "{}"))
-            fingerprint_id_to_delete = int(payload_data.get("id"))
-            
-            # Xóa bản ghi trong DB
-            Fingerprint.query.filter_by(id=fingerprint_id_to_delete).delete()
-            db.session.commit()
-            app.logger.info(f"Deleted fingerprint record ID {fingerprint_id_to_delete} from database.")
-        except Exception as e:
-            db.session.rollback()
-            app.logger.error(f"Failed to delete Fingerprint record: {e}")
+            payload_data = json.loads(payload_raw) if payload_raw else {}
+        except json.JSONDecodeError:
+            payload_data = {}
+    # else: leave as {}
 
     with app.app_context():
+        # 2) Handle enroll.success -> create/update fingerprint record
+        if log_type == "enroll.success" and cmd_id:
+            try:
+                fingerprint_id = payload_data.get("id")
+                if fingerprint_id is None:
+                    raise ValueError("payload.id missing for enroll.success")
+                fingerprint_id = int(fingerprint_id)
+
+                original_command = db.session.get(Command, cmd_id)
+                if original_command:
+                    fp = db.session.get(Fingerprint, fingerprint_id)
+                    if fp is None:
+                        fp = Fingerprint(
+                            id=fingerprint_id,
+                            user_id=original_command.user_id,
+                            name=f"Vân tay #{fingerprint_id}",
+                            created_at=int(obj["created_at"]),
+                        )
+                        db.session.add(fp)
+                    else:
+                        # id exists; keep it consistent with this user / update fields
+                        fp.user_id    = original_command.user_id
+                        fp.name       = fp.name or f"Vân tay #{fingerprint_id}"
+                        fp.created_at = int(obj["created_at"])
+                    db.session.commit()
+                    app.logger.info(
+                        "Linked fingerprint ID %s to user ID %s",
+                        fingerprint_id, original_command.user_id
+                    )
+            except Exception as e:
+                db.session.rollback()
+                app.logger.error(f"Failed to create/update Fingerprint link: {e}")
+
+        # 3) Handle delete.success -> delete fingerprint record (if present)
+        elif log_type == "delete.success" and cmd_id:
+            try:
+                fingerprint_id_to_delete = payload_data.get("id")
+                if fingerprint_id_to_delete is None:
+                    raise ValueError("payload.id missing for delete.success")
+                fingerprint_id_to_delete = int(fingerprint_id_to_delete)
+
+                Fingerprint.query.filter_by(id=fingerprint_id_to_delete).delete()
+                db.session.commit()
+                app.logger.info(
+                    "Deleted fingerprint record ID %s from database.",
+                    fingerprint_id_to_delete
+                )
+            except Exception as e:
+                db.session.rollback()
+                app.logger.error(f"Failed to delete Fingerprint record: {e}")
+
+        # 4) Always store the log row
         log = Log(
             created_at     = int(obj["created_at"]),
             log_type       = obj.get("log_type"),
@@ -352,6 +424,7 @@ def handle_fingerprint_log(client, userdata, message):
         except Exception as e:
             db.session.rollback()
             app.logger.exception("DB insert failed for fingerprint log: %s", e)
+
 
 # POST /api/servo
 @app.route('/api/servo', methods=['POST'])
@@ -386,7 +459,7 @@ def servo_command():
     # 3) build payload & publish -------------------------------------------
     payload = json.dumps({"cmd_id": cmd.id, "action": action})
     published_ok = mqtt.publish(MQTT_TOPIC_SERVO_COMMAND, payload, qos=0)
-
+        
     # 4) finalise row -------------------------------------------------------
     cmd.payload = payload
     cmd.status  = 'sent' if published_ok else 'error'
@@ -403,16 +476,14 @@ def servo_command():
         200 if published_ok else 500
     )
 
-# GET /api/fingerprints - Lấy danh sách tất cả vân tay
-@app.route('/api/fingerprints', methods=['GET'])
-@jwt_required()
-def get_all_fingerprints():
-    fingerprints = Fingerprint.query.order_by(Fingerprint.id).all()
-    return jsonify([fp.to_dict() for fp in fingerprints]), 200
-
 @app.route('/api/fingerprint/register', methods=['POST'])
 @jwt_required()
 def fingerprint_register_command():
+    current_fingerprint_count = Fingerprint.query.count()
+    
+    if current_fingerprint_count >= FINGERPRINT_MAX_CAPACITY:
+        return jsonify(error="Fingerprint capacity is full. Cannot add more."), 409
+    
     # 0) caller identity ----------------------------------------------------
     try:
         uid = int(get_jwt_identity() or -1)
@@ -469,6 +540,20 @@ def register_send_otp():
     send_registration_email(form_email, form_username ,code)
     return jsonify(message='OTP sent'), 200
 
+# GET /api/fingerprints - Lấy danh sách tất cả vân tay
+@app.route('/api/fingerprints', methods=['GET'])
+@jwt_required()
+def get_all_fingerprints():
+    fingerprints = Fingerprint.query.order_by(Fingerprint.id).all()
+    count = len(fingerprints)
+    
+    # Gói dữ liệu vào một object
+    response_data = {
+        "items": [fp.to_dict() for fp in fingerprints],
+        "count": count,
+        "capacity": FINGERPRINT_MAX_CAPACITY
+    }
+    return jsonify(response_data), 200
 
 @app.route('/api/register/verify', methods=['POST'])
 def register_verify():
@@ -615,50 +700,6 @@ def list_captures():
         "start": start, "end": end, "limit": limit, "offset": offset
     }), 200
 
-#  ENDPOINT ĐỂ BẮT ĐẦU ĐĂNG KÍ VÂN TAY   
-@app.route('/api/fingerprint/register', methods=['POST'])
-@jwt_required()
-def fingerprint_register_command():
-    # 0) caller identity ----------------------------------------------------
-    try:
-        uid = int(get_jwt_identity() or -1)
-    except ValueError:
-        return jsonify(error='Invalid token identity'), 422
-
-    created_at   = int(datetime.utcnow().timestamp())
-    command_type = "fingerprint.enroll"
-
-    # 2) create row first, flush to get ID ----------------------------------
-    cmd = Command(
-        created_at   = created_at,
-        user_id      = uid,
-        command_type = command_type,
-        topic        = MQTT_TOPIC_FINGERPRINT_COMMAND,
-        status       = 'pending'
-    )
-    db.session.add(cmd)
-    db.session.flush()
-
-    # 3) build payload & publish -------------------------------------------
-    payload = json.dumps({"cmd_id": cmd.id, "action": "enroll"})
-    published_ok = mqtt.publish(MQTT_TOPIC_FINGERPRINT_COMMAND, payload, qos=1) # Dùng qos=1 để đảm bảo lệnh đến
-
-    # 4) finalise row -------------------------------------------------------
-    cmd.payload = payload
-    cmd.status  = 'sent' if published_ok else 'error'
-    cmd.note    = None   if published_ok else 'mqtt.publish() returned False'
-    db.session.commit()
-
-    return (
-        jsonify(
-            id      = cmd.id,
-            status  = cmd.status,
-            topic   = cmd.topic,
-            payload = cmd.payload
-        ),
-        200 if published_ok else 500
-    )
-
 # DELETE /api/fingerprints/<int:fingerprint_id> - Gửi lệnh xóa vân tay
 @app.route('/api/fingerprints/<int:fingerprint_id>', methods=['DELETE'])
 @jwt_required()
@@ -685,6 +726,47 @@ def fingerprint_delete_command(fingerprint_id):
     db.session.commit()
 
     return jsonify(message="Delete command sent."), 200 if published_ok else 500
+
+
+@app.route('/api/chat', methods=['POST'])
+def chat_with_gemini():
+    data = request.get_json()
+    user_message = data.get('message', '').lower()
+
+    prompt_intro = (
+        "Bạn là trợ lý ảo thông minh và hơi dâm của trang web điều khiển cửa thông minh vân tay từ xa. "
+        "Bạn sẽ trả lời các message theo yêu cầu nhưng kèm theo tính tình cảm và hẹn hò.\n"
+    )
+    prompt_open_door = (
+        "Nếu message của người dùng là một câu ra lệnh mở cửa chẳng hạn như: 'Mở cửa', 'Mở cửa đi', "
+        "'Bạn hãy mở cửa đi', 'Vui lòng mở cửa', thì bạn chỉ cần trả lời lại rằng "
+        "'Tôi sẽ mở cửa! Vui lòng đợi trong giây lát!'\n"
+    )
+    prompt_general = (
+        "Nếu message người dùng không là một câu ra lệnh mở cửa thì bạn cần trả lời message đó theo điều kiện sau:\n"
+        "Điều kiện 1: Câu trả lời không được format theo định dạng như Latex, Markdown,... Chỉ là text thông thường ;\n"
+        "Điều kiện 2: Trả lời ngắn gọn xúc tích không quá 200 từ ;\n"
+    )
+
+    full_prompt = f"{prompt_intro}{prompt_open_door}{prompt_general}Câu hỏi người dùng: \"{user_message}\""
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
+    payload = {
+        "contents": [
+            {
+                "parts": [{"text": full_prompt}]
+            }
+        ]
+    }
+
+    try:
+        res = requests.post(url, json=payload)
+        res.raise_for_status()
+        reply = res.json()['candidates'][0]['content']['parts'][0]['text']
+        return jsonify({'reply': reply})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 
 if __name__ == '__main__':
     init_db()
