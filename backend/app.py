@@ -806,6 +806,29 @@ def chat_with_gemini():
         app.logger.error(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
+# POST /api/profile/webhook
+@app.route('/api/profile/webhook', methods=['POST'])
+@jwt_required()
+def update_webhook():
+    try:
+        uid = int(get_jwt_identity() or -1)
+    except ValueError:
+        return jsonify(error='Invalid token identity'), 422
+
+    data = request.get_json() or {}
+    url = data.get('url', '').strip()
+    if not url:
+        return jsonify(error='Missing webhook URL'), 400
+
+    wh = Webhook.query.filter_by(user_id=uid).first()
+    if wh:
+        wh.url = url
+    else:
+        wh = Webhook(user_id=uid, url=url, created_at=int(datetime.utcnow().timestamp()))
+        db.session.add(wh)
+
+    db.session.commit()
+    return jsonify(message='Webhook saved successfully')
 
 if __name__ == '__main__':
     init_db()
