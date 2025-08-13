@@ -21,8 +21,22 @@ function ChatBox({ messages, input, onInputChange, onSend, onKeyDown, loading })
             <span className={styles.icon}>
               {msg.sender === 'user' ? '👤' : '🤖'}
             </span>
+
             <div className={styles.messageBubble}>
-              {msg.text}
+              {/* text (nếu có) */}
+              {msg.text && <div>{msg.text}</div>}
+
+              {/* image (nếu có) */}
+              {msg.imageUrl && (
+                <a href={msg.imageUrl} target="_blank" rel="noreferrer">
+                  <img
+                    src={msg.imageUrl}
+                    alt="capture"
+                    className={styles.messageImage}
+                    loading="lazy"
+                  />
+                </a>
+              )}
             </div>
           </div>
         ))}
@@ -35,7 +49,7 @@ function ChatBox({ messages, input, onInputChange, onSend, onKeyDown, loading })
             </div>
           </div>
         )}
-        {}
+
         <div ref={messagesEndRef} />
       </div>
 

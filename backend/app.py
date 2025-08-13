@@ -312,7 +312,6 @@ def handle_servo_log(client, userdata, message):
             original_command = db.session.get(Command, cmd_id)
             if original_command:
                 wh = Webhook.query.filter_by(user_id=original_command.user_id).first()
-                app.logger.error(f"Webhook found {wh.url}")
                 if wh:
                     user = User.query.filter_by(id=original_command.user_id).first()
                     username = user.username if user else "Unknown"
@@ -365,18 +364,84 @@ def handle_fingerprint_log(client, userdata, message):
     # else: leave as {}
 
     with app.app_context():
+        
         if log_type == "match.success":
-            # parse cái payload_data lấy cái id vân tay
-            # query user_id trong bảng fingerprint ứng với id vân tay trên
-            # gửi tin nhắn "Người dùng {username} quét vân tay thành công vô webhook url trong bảng Webhook có user_id trên"
-            print()
-            
-        # 2) Handle enroll.success -> create/update fingerprint record
+            fingerprint_id = payload_data.get("id")
+            if fingerprint_id is not None:
+                fp = Fingerprint.query.get(int(fingerprint_id))
+                if fp:
+                    user = User.query.get(fp.user_id)
+                    wh = Webhook.query.filter_by(user_id=fp.user_id).first()
+                    if wh:
+                        ok, code, body = wh.notify(
+                            content=f"✅ Người dùng {user.username} quét vân tay thành công",
+                            event="fingerprint.match.success",
+                            fingerprint_id=fingerprint_id
+                        )
+                        if ok:
+                            app.logger.info(f"Sent webhook (match.success) to {wh.url}")
+                        else:
+                            app.logger.error(f"Webhook failed ({code}): {body}")
+            else:
+                app.logger.warning("match.success missing fingerprint id")
+
+        elif log_type == "match.fail":
+            fingerprint_id = payload_data.get("id")
+            wh = None
+            if fingerprint_id is not None:
+                fp = Fingerprint.query.get(int(fingerprint_id))
+                if fp:
+                    wh = Webhook.query.filter_by(user_id=fp.user_id).first()
+            if wh:
+                ok, code, body = wh.notify(
+                    content="❌ Có người quét vân tay nhưng thất bại",
+                    event="fingerprint.match.fail",
+                    fingerprint_id=fingerprint_id
+                )
+                if ok:
+                    app.logger.info(f"Sent webhook (match.fail) to {wh.url}")
+                else:
+                    app.logger.error(f"Webhook failed ({code}): {body}")
+            elif log_type == "enroll.success" and cmd_id:
+                original_command = db.session.get(Command, cmd_id)
+                user = User.query.filter_by(id=original_command.user_id).first()
+                
+                send_fingerprint_action_email(user.email, user.username, "enroll") # send email when user enroll a fingerprint successfully
+                try:
+                    fingerprint_id = payload_data.get("id")
+                    if fingerprint_id is None:
+                        raise ValueError("payload.id missing for enroll.success")
+                    fingerprint_id = int(fingerprint_id)
+
+                    original_command = db.session.get(Command, cmd_id)
+                    if original_command:
+                        fp = db.session.get(Fingerprint, fingerprint_id)
+                        if fp is None:
+                            fp = Fingerprint(
+                                id=fingerprint_id,
+                                user_id=original_command.user_id,
+                                name=f"Vân tay #{fingerprint_id}",
+                                created_at=int(obj["created_at"]),
+                            )
+                            db.session.add(fp)
+                        else:
+                            fp.user_id    = original_command.user_id
+                            fp.name       = fp.name or f"Vân tay #{fingerprint_id}"
+                            fp.created_at = int(obj["created_at"])
+                        db.session.commit()
+                        app.logger.info(
+                            "Linked fingerprint ID %s to user ID %s",
+                            fingerprint_id, original_command.user_id
+                        )
+                except Exception as e:
+                    db.session.rollback()
+                    app.logger.error(f"Failed to create/update Fingerprint link: {e}")
+
         elif log_type == "enroll.success" and cmd_id:
             original_command = db.session.get(Command, cmd_id)
             user = User.query.filter_by(id=original_command.user_id).first()
             
-            send_fingerprint_action_email(user.email, user.username, "enroll") # send email when user enroll a fingerprint successfully
+            # send_fingerprint_action_email(user.email, user.username, "enroll") # send email when user enroll a fingerprint successfully
             try:
                 fingerprint_id = payload_data.get("id")
                 if fingerprint_id is None:
@@ -411,7 +476,7 @@ def handle_fingerprint_log(client, userdata, message):
             
             original_command = db.session.get(Command, cmd_id)
             user = User.query.filter_by(id=original_command.user_id).first()
-            send_fingerprint_action_email(user.email, user.username, "delete") # send email when user delete a fingerprint successfully
+            # send_fingerprint_action_email(user.email, user.username, "delete") # send email when user delete a fingerprint successfully
             try:
                 original_command = db.session.get(Command, cmd_id)
                 user = User.query.filter_by(id=original_command.user_id).first()
@@ -785,7 +850,7 @@ def chat_with_gemini():
     )
     prompt_open_door = (
         "Nếu message của người dùng là một câu ra lệnh mở cửa chẳng hạn như: 'Mở/Đóng cửa', 'Mở/Đóng cửa đi', "
-        "'Bạn hãy mở/đóng cửa đi', 'Vui lòng mở/đóng cửa', thì bạn chỉ cần trả lời lại rằng "
+        "'Bạn hãy mở/đóng cửa đi', 'Vui lòng mở/đóng cửa', 'Vừng ơi mở cửa ra', 'Vừng ơi đóng cửa lại' thì bạn chỉ cần trả lời lại rằng "
         "'Tôi sẽ mở/đóng cửa! Vui lòng đợi trong giây lát!'\n"
     )
     prompt_lcd = (
@@ -793,13 +858,18 @@ def chat_with_gemini():
         "'Viết: ....', 'Hiển thị: ....', thì bạn chỉ cần trả lời lại rằng "
         "'Hiển thị thành công!'\n"
     )
+    prompt_capture = (
+        "Nếu message của người dùng là yêu cầu lấy ảnh mới nhất: 'Lấy ảnh mới nhất ...', 'Lấy ảnh gần đây nhất ...', "
+        "'Lấy ảnh ....', 'Xin ảnh ....', thì bạn chỉ cần trả lời lại rằng "
+        "'Ảnh chụp nè: '\n"
+    )
     prompt_general = (
         "Nếu message người dùng không là một câu ra lệnh mở cửa thì bạn cần trả lời message đó theo điều kiện sau:\n"
         "Điều kiện 1: Câu trả lời không được format theo định dạng như Latex, Markdown,... Chỉ là text thông thường ;\n"
         "Điều kiện 2: Trả lời ngắn gọn xúc tích không quá 200 từ ;\n"
     )
 
-    full_prompt = f"{prompt_intro}{prompt_open_door}{prompt_lcd}{prompt_general}Câu hỏi người dùng: \"{user_message}\""
+    full_prompt = f"{prompt_intro}{prompt_open_door}{prompt_lcd}{prompt_capture}{prompt_general}Câu hỏi người dùng: \"{user_message}\""
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
     payload = {
@@ -817,6 +887,7 @@ def chat_with_gemini():
 
         action = None
         lcd_message = None
+        capture_requested = False
 
         # Nhận diện mở cửa
         if reply.lower().startswith("tôi sẽ mở cửa"):
@@ -826,24 +897,22 @@ def chat_with_gemini():
 
         # Nhận diện hiển thị LCD
         elif reply.lower().startswith("hiển thị"):
-            # Lấy nội dung trong dấu ngoặc kép hoặc sau dấu :
             match = re.search(r'["“](.+?)["”]', user_message)
             if match:
                 lcd_message = match.group(1).strip()
             else:
-                # fallback: lấy phần sau dấu :
                 parts = user_message.split(':', 1)
                 if len(parts) > 1:
                     lcd_message = parts[1].strip()
 
+        # Nhận diện yêu cầu ảnh
+        elif reply.lower().startswith("ảnh chụp nè"):
+            capture_requested = True
+
         # Thực thi mở cửa
         if action:
-            try:
-                verify_jwt_in_request(optional=True)
-                user_id = get_jwt_identity()
-            except NoAuthorizationError:
-                user_id = None
-
+            verify_jwt_in_request(optional=True)
+            user_id = get_jwt_identity()
             if not user_id:
                 return jsonify({'error': 'Missing or invalid JWT token'}), 401
 
@@ -858,12 +927,8 @@ def chat_with_gemini():
 
         # Thực thi hiển thị LCD
         if lcd_message:
-            try:
-                verify_jwt_in_request(optional=True)
-                user_id = get_jwt_identity()
-            except NoAuthorizationError:
-                user_id = None
-
+            verify_jwt_in_request(optional=True)
+            user_id = get_jwt_identity()
             if not user_id:
                 return jsonify({'error': 'Missing or invalid JWT token'}), 401
 
@@ -875,6 +940,20 @@ def chat_with_gemini():
             )
             if lcd_resp.status_code != 200:
                 return jsonify({'reply': reply, 'lcd_error': lcd_resp.json()}), 500
+
+        # Thực thi lấy ảnh mới nhất
+        if capture_requested:
+            cap_url = request.host_url.rstrip('/') + '/api/captures/latest'
+            cap_resp = requests.get(cap_url, cookies=request.cookies)
+            if cap_resp.status_code == 200:
+                cap_data = cap_resp.json()
+                image_url = cap_data.get('url')  
+                if image_url:
+                    return jsonify({'reply': reply, 'image_url': image_url})
+                else:
+                    return jsonify({'reply': reply, 'error': 'No image URL in capture'}), 500
+            else:
+                return jsonify({'reply': reply, 'capture_error': cap_resp.json()}), 500
 
         return jsonify({'reply': reply})
     
