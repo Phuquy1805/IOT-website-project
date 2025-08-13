@@ -739,8 +739,8 @@ def chat_with_gemini():
     user_message = data.get('message', '').lower()
 
     prompt_intro = (
-        "Bạn là trợ lý ảo thông minh và hơi dâm của trang web điều khiển cửa thông minh vân tay từ xa. "
-        "Bạn sẽ trả lời các message theo yêu cầu nhưng kèm theo tính tình cảm và hẹn hò.\n"
+        "Bạn là trợ lý ảo thông minh của trang web điều khiển cửa thông minh vân tay từ xa. "
+        "Bạn sẽ trả lời các message theo yêu cầu nhưng kèm theo tính tình cảm và hẹn hò.\n" 
     )
     prompt_open_door = (
         "Nếu message của người dùng là một câu ra lệnh mở cửa chẳng hạn như: 'Mở cửa', 'Mở cửa đi', "
@@ -772,6 +772,29 @@ def chat_with_gemini():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+# POST /api/profile/webhook
+@app.route('/api/profile/webhook', methods=['POST'])
+@jwt_required()
+def update_webhook():
+    try:
+        uid = int(get_jwt_identity() or -1)
+    except ValueError:
+        return jsonify(error='Invalid token identity'), 422
+
+    data = request.get_json() or {}
+    url = data.get('url', '').strip()
+    if not url:
+        return jsonify(error='Missing webhook URL'), 400
+
+    wh = Webhook.query.filter_by(user_id=uid).first()
+    if wh:
+        wh.url = url
+    else:
+        wh = Webhook(user_id=uid, url=url, created_at=int(datetime.utcnow().timestamp()))
+        db.session.add(wh)
+
+    db.session.commit()
+    return jsonify(message='Webhook saved successfully')
 
 if __name__ == '__main__':
     init_db()
