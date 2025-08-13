@@ -806,8 +806,8 @@ def chat_with_gemini():
         app.logger.error(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
-# POST /api/profile/webhook
-@app.route('/api/profile/webhook', methods=['POST'])
+# POST /api/webhook
+@app.route('/api/webhook', methods=['POST'])
 @jwt_required()
 def update_webhook():
     try:

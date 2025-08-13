@@ -9,7 +9,7 @@ export default function DisplayControl() {
     const trimmed = text.trim();
     if (!trimmed) return;
     try {
-      await sendLCDMessage({ message: trimmed }); 
+      await sendLCDMessage(trimmed); 
       setDisplaying(trimmed);
       setText('');
     } catch (err) {
