@@ -56,7 +56,7 @@ export default function FingerprintManager() {
       try {
         toast.info(`Đang gửi yêu cầu xóa vân tay #${id}...`);
         await deleteFingerprint(id);
-        fetchFingerprints(); // Tải lại để cập nhật count
+        fetchFingerprints();
         toast.success(`Đã gửi lệnh xóa vân tay #${id} thành công!`);
       } catch (error) {
         toast.error(`Gửi yêu cầu xóa thất bại cho vân tay #${id}.`);

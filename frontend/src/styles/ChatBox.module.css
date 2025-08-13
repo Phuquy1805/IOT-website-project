@@ -28,7 +28,8 @@
   display: flex;
   align-items: flex-start;
   margin-bottom: 10px;
-  max-width: 80%;
+  max-width: 85%;
+  width: fit-content;
 }
 
 .bot {
@@ -37,7 +38,8 @@
 
 .user {
   align-self: flex-end;
-  flex-direction: row-reverse;
+  flex-direction: row;
+  margin-left: auto;
 }
 
 .messageBubble {
@@ -67,6 +69,11 @@
   font-size: 0.7em;
   color: gray;
   margin: 0 8px;
+}
+
+.user .icon {
+  margin-right: 8px;
+  margin-left: 0;
 }
 
 .inputArea {

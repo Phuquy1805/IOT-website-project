@@ -1,6 +1,12 @@
+// src/components/ChatWidget.jsx
 import React, { useState } from 'react';
 import ChatBox from './ChatBox';
-import { chatWithGemini } from '../services/api'; 
+import { chatWithGemini } from '../services/api';
+
+const extractFirstUrl = (s = '') => {
+  const m = s.match(/https?:\/\/\S+/i);
+  return m ? m[0] : null;
+};
 
 export default function ChatWidget() {
   const [open, setOpen] = useState(false);
@@ -11,36 +17,62 @@ export default function ChatWidget() {
   const [loading, setLoading] = useState(false);
 
   const toggleChat = () => setOpen(!open);
-
   const handleInputChange = (e) => setInput(e.target.value);
 
   const handleSend = async () => {
-    if (!input.trim()) return;
+    const text = input.trim();
+    if (!text || loading) return;
 
-    const userMessage = { sender: 'user', text: input };
-    setMessages((prev) => [...prev, userMessage]);
+    // Đẩy tin nhắn user
+    setMessages(prev => [...prev, { sender: 'user', text }]);
     setInput('');
     setLoading(true);
 
     try {
-      const response = await chatWithGemini(input); 
-      const replyText = response.data.reply || 'Em chưa hiểu ý anh 🥺';
-      setMessages((prev) => [...prev, { sender: 'bot', text: replyText }]);
-    } catch (error) {
-      console.error('Lỗi gọi API:', error);
-      setMessages((prev) => [...prev, { sender: 'bot', text: '⚠️ Không thể kết nối với AI' }]);
+      const response = await chatWithGemini(text); // POST /api/chat
+      const data = response?.data ?? {};
+
+      // Backend có thể trả về: { reply, image_url }
+      const replyTextRaw = data.reply || 'Em chưa hiểu ý anh 🥺';
+      const apiImageUrl = data.image_url || data.imageUrl || null;
+
+      // Trường hợp backend cũ: reply chứa luôn URL -> rút URL ra
+      const inferredUrl = !apiImageUrl ? extractFirstUrl(replyTextRaw) : null;
+
+      // Nếu có URL trong reply, có thể xóa URL khỏi text để UI gọn hơn
+      const replyText = inferredUrl
+        ? replyTextRaw.replace(inferredUrl, '').trim()
+        : replyTextRaw;
+
+      setMessages(prev => [
+        ...prev,
+        {
+          sender: 'bot',
+          text: replyText,
+          imageUrl: apiImageUrl || inferredUrl || null, // <-- ChatBox sẽ hiển thị ảnh
+        }
+      ]);
+    } catch (err) {
+      console.error('Lỗi gọi API:', err);
+      setMessages(prev => [
+        ...prev,
+        { sender: 'bot', text: '⚠️ Không thể kết nối với AI' }
+      ]);
     } finally {
       setLoading(false);
     }
   };
 
   const handleKeyDown = (e) => {
-    if (e.key === 'Enter') handleSend();
+    if (e.key === 'Enter') {
+      e.preventDefault(); // tránh submit/nẩy UI
+      handleSend();
+    }
   };
 
   return (
     <>
-      {}
+      {/* Nút mở chat */}
       <div
         onClick={toggleChat}
         style={{
@@ -64,18 +96,18 @@ export default function ChatWidget() {
         💬
       </div>
 
-      {}
+      {/* Hộp chat */}
       {open && (
         <div
           style={{
             position: 'fixed',
             bottom: '90px',
             left: '20px',
-            width: '350px',
-            height: '500px',
+            width: 'clamp(360px, 40vw, 560px)',
+            height: 'min(70vh, 640px)',
             backgroundColor: '#fff',
-            borderRadius: '8px',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+            borderRadius: '12px',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
             overflow: 'hidden',
             zIndex: 1000,
             display: 'flex',
@@ -92,6 +124,7 @@ export default function ChatWidget() {
           />
         </div>
       )}
+
     </>
   );
 }
