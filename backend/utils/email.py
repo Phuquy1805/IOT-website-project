@@ -95,7 +95,7 @@ def send_registration_email(to_email: str, username: str, otp_code: str) -> None
     </html>
     """
     params: resend.Emails.SendParams = {
-        "from": "IOT Smart Door <Nhom8_23CLC03@redtailco.xyz>",
+        "from": "IOT Smart Door <Nhom8_23CLC03@obiwan.io.vn>",
         "to": [to_email],
         "subject": "Registration OTP",
         "html": html,
@@ -179,7 +179,7 @@ def send_fingerprint_action_email(to_email: str, username: str, action: str) -> 
     </html>
     """
     params: resend.Emails.SendParams = {
-        "from": "IOT Smart Door <Nhom8_23CLC03@redtailco.xyz>",
+        "from": "IOT Smart Door <Nhom8_23CLC03@obiwan.io.vn>",
         "to": [to_email],
         "subject": subject,
         "html": html_content,
