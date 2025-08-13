@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import secrets
 import requests
@@ -15,7 +16,7 @@ from flask import Flask, request, jsonify, make_response
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity, unset_jwt_cookies, set_access_cookies, verify_jwt_in_request
 from flask_jwt_extended.exceptions import NoAuthorizationError
-from utils.email import send_registration_email
+from utils.email import send_registration_email, send_fingerprint_action_email
 from utils.topic import topic
 
 load_dotenv()
@@ -364,8 +365,18 @@ def handle_fingerprint_log(client, userdata, message):
     # else: leave as {}
 
     with app.app_context():
+        if log_type == "match.success":
+            # parse cái payload_data lấy cái id vân tay
+            # query user_id trong bảng fingerprint ứng với id vân tay trên
+            # gửi tin nhắn "Người dùng {username} quét vân tay thành công vô webhook url trong bảng Webhook có user_id trên"
+            print()
+            
         # 2) Handle enroll.success -> create/update fingerprint record
-        if log_type == "enroll.success" and cmd_id:
+        elif log_type == "enroll.success" and cmd_id:
+            original_command = db.session.get(Command, cmd_id)
+            user = User.query.filter_by(id=original_command.user_id).first()
+            
+            send_fingerprint_action_email(user.email, user.username, "enroll") # send email when user enroll a fingerprint successfully
             try:
                 fingerprint_id = payload_data.get("id")
                 if fingerprint_id is None:
@@ -384,7 +395,6 @@ def handle_fingerprint_log(client, userdata, message):
                         )
                         db.session.add(fp)
                     else:
-                        # id exists; keep it consistent with this user / update fields
                         fp.user_id    = original_command.user_id
                         fp.name       = fp.name or f"Vân tay #{fingerprint_id}"
                         fp.created_at = int(obj["created_at"])
@@ -397,9 +407,14 @@ def handle_fingerprint_log(client, userdata, message):
                 db.session.rollback()
                 app.logger.error(f"Failed to create/update Fingerprint link: {e}")
 
-        # 3) Handle delete.success -> delete fingerprint record (if present)
         elif log_type == "delete.success" and cmd_id:
+            
+            original_command = db.session.get(Command, cmd_id)
+            user = User.query.filter_by(id=original_command.user_id).first()
+            send_fingerprint_action_email(user.email, user.username, "delete") # send email when user delete a fingerprint successfully
             try:
+                original_command = db.session.get(Command, cmd_id)
+                user = User.query.filter_by(id=original_command.user_id).first()
                 fingerprint_id_to_delete = payload_data.get("id")
                 if fingerprint_id_to_delete is None:
                     raise ValueError("payload.id missing for delete.success")
@@ -485,7 +500,7 @@ def servo_command():
 
 @app.route('/api/lcd', methods=['POST'])
 @jwt_required()
-def api_lcd():
+def lcd_command():
     data = request.get_json()
     message = data.get('message', '').strip()
     if not message:
@@ -765,13 +780,18 @@ def chat_with_gemini():
     user_message = data.get('message', '').lower()
 
     prompt_intro = (
-        "Bạn là trợ lý ảo thông minh của trang web điều khiển cửa thông minh vân tay từ xa. "
-        "Bạn sẽ trả lời các message theo yêu cầu nhưng kèm theo tính tình cảm và hẹn hò.\n" 
+        "Bạn là trợ lý ảo thông minh và thân thiện của trang web điều khiển cửa thông minh vân tay từ xa. "
+        "Bạn sẽ trả lời các message theo yêu cầu nhưng kèm theo tính tình cảm.\n" 
     )
     prompt_open_door = (
         "Nếu message của người dùng là một câu ra lệnh mở cửa chẳng hạn như: 'Mở/Đóng cửa', 'Mở/Đóng cửa đi', "
         "'Bạn hãy mở/đóng cửa đi', 'Vui lòng mở/đóng cửa', thì bạn chỉ cần trả lời lại rằng "
         "'Tôi sẽ mở/đóng cửa! Vui lòng đợi trong giây lát!'\n"
+    )
+    prompt_lcd = (
+        "Nếu message của người dùng là một câu yêu cầu hiển thị tin nhắn hay viết tin nhắn lên LCD chẳng hạn như: 'Viết tin nhắn: ...', 'Hiển thị tin nhắn: ...', "
+        "'Viết: ....', 'Hiển thị: ....', thì bạn chỉ cần trả lời lại rằng "
+        "'Hiển thị thành công!'\n"
     )
     prompt_general = (
         "Nếu message người dùng không là một câu ra lệnh mở cửa thì bạn cần trả lời message đó theo điều kiện sau:\n"
@@ -779,7 +799,7 @@ def chat_with_gemini():
         "Điều kiện 2: Trả lời ngắn gọn xúc tích không quá 200 từ ;\n"
     )
 
-    full_prompt = f"{prompt_intro}{prompt_open_door}{prompt_general}Câu hỏi người dùng: \"{user_message}\""
+    full_prompt = f"{prompt_intro}{prompt_open_door}{prompt_lcd}{prompt_general}Câu hỏi người dùng: \"{user_message}\""
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
     payload = {
@@ -794,12 +814,29 @@ def chat_with_gemini():
         res = requests.post(url, json=payload)
         res.raise_for_status()
         reply = res.json()['candidates'][0]['content']['parts'][0]['text']
+
         action = None
-        if reply.startswith("Tôi sẽ mở cửa"):
+        lcd_message = None
+
+        # Nhận diện mở cửa
+        if reply.lower().startswith("tôi sẽ mở cửa"):
             action = "open"
-        elif reply.startswith("Tôi sẽ đóng cửa"):
+        elif reply.lower().startswith("tôi sẽ đóng cửa"):
             action = "close"
 
+        # Nhận diện hiển thị LCD
+        elif reply.lower().startswith("hiển thị"):
+            # Lấy nội dung trong dấu ngoặc kép hoặc sau dấu :
+            match = re.search(r'["“](.+?)["”]', user_message)
+            if match:
+                lcd_message = match.group(1).strip()
+            else:
+                # fallback: lấy phần sau dấu :
+                parts = user_message.split(':', 1)
+                if len(parts) > 1:
+                    lcd_message = parts[1].strip()
+
+        # Thực thi mở cửa
         if action:
             try:
                 verify_jwt_in_request(optional=True)
@@ -811,17 +848,34 @@ def chat_with_gemini():
                 return jsonify({'error': 'Missing or invalid JWT token'}), 401
 
             servo_url = request.host_url.rstrip('/') + '/api/servo'
-            app.logger.info(f"Gửi lệnh tới servo: {servo_url}")
-
             servo_resp = requests.post(
                 servo_url,
                 json={"action": action},
                 cookies=request.cookies
             )
-
             if servo_resp.status_code != 200:
                 return jsonify({'reply': reply, 'servo_error': servo_resp.json()}), 500
-        
+
+        # Thực thi hiển thị LCD
+        if lcd_message:
+            try:
+                verify_jwt_in_request(optional=True)
+                user_id = get_jwt_identity()
+            except NoAuthorizationError:
+                user_id = None
+
+            if not user_id:
+                return jsonify({'error': 'Missing or invalid JWT token'}), 401
+
+            lcd_url = request.host_url.rstrip('/') + '/api/lcd'
+            lcd_resp = requests.post(
+                lcd_url,
+                json={"message": lcd_message},
+                cookies=request.cookies
+            )
+            if lcd_resp.status_code != 200:
+                return jsonify({'reply': reply, 'lcd_error': lcd_resp.json()}), 500
+
         return jsonify({'reply': reply})
     
     except Exception as e:

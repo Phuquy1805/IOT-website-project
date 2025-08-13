@@ -208,8 +208,6 @@ uint8_t getFingerprintEnroll(uint32_t cmd_id)
       return FINGERPRINT_PACKETRECIEVEERR;
     }
   }
-  // Tại đây, `id` chính là vị trí trống đầu tiên.
-  // Các dòng thông báo thành công đã được xóa khỏi đây.
 
   // ----- Bước 2: Bắt đầu quá trình đăng ký cho ID đã tìm được -----
   Serial.printf("Enrolling for ID #%d\n", id);
@@ -336,6 +334,8 @@ void publishFingerprintLog(const char *log_type, const char *description, const 
 {
   // Hiển thị thông báo lên LCD (nếu có)
   lcd.printMessage(description);
+
+  
 
   StaticJsonDocument<256> logDoc;
   logDoc["created_at"] = (uint32_t)time(nullptr);

@@ -101,3 +101,87 @@ def send_registration_email(to_email: str, username: str, otp_code: str) -> None
         "html": html,
     }
     resend.Emails.send(params)
+    
+def send_fingerprint_action_email(to_email: str, username: str, action: str) -> None:
+    subject = f"Smart Door Notification: Fingerprint {action} Success!"
+    html_content = f"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+    <meta charset="UTF-8" />
+    <title>Smart Door Notification</title>
+    <style>
+        * {{
+        box-sizing: border-box;
+        -webkit-font-smoothing: antialiased;
+        }}
+        body {{
+        margin: 0;
+        padding: 0;
+        background: #f1f5f9;
+        font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+        color: #374151;
+        }}
+        table.wrapper {{ width: 100%; border-collapse: collapse; }}
+        td.container {{
+        width: 100%;
+        max-width: 600px;
+        margin: 40px auto;
+        background: #ffffff;
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow: 0 8px 18px rgba(0,0,0,0.06);
+        }}
+        .header {{
+        background: linear-gradient(135deg,#0052cc 0%,#6c63ff 100%);
+        color: #ffffff;
+        padding: 20px;
+        text-align: center;
+        font-size: 24px;
+        font-weight: bold;
+        }}
+        .content {{
+        padding: 30px;
+        line-height: 1.6;
+        }}
+        .footer {{
+        padding: 20px;
+        text-align: center;
+        font-size: 13px;
+        color: #6b7280;
+        background: #f9fafb;
+        }}
+        @media only screen and (max-width: 620px) {{
+        .content {{ padding: 24px; }}
+        h1 {{ font-size: 22px; }}
+        }}
+    </style>
+    </head>
+    <body>
+        <table role="presentation" class="wrapper">
+            <tr>
+            <td align="center">
+                <table role="presentation" class="container">
+                <tr><td class="header">Smart Door Notification</td></tr>
+                <tr>
+                    <td class="content">
+                    <p>Hello <strong>{username}</strong>,</p>
+                    <p>A fingerprint has been successfully <strong>{action}</strong> from your Smart Door system.</p>
+                    <p>If you did not initiate this action, please contact support immediately.</p>
+                    </td>
+                </tr>
+                <tr><td class="footer">&copy; IOT, Nhóm 8 - 23CLC03</td></tr>
+                </table>
+            </td>
+            </tr>
+        </table>
+    </body>
+    </html>
+    """
+    params: resend.Emails.SendParams = {
+        "from": "IOT Smart Door <Nhom8_23CLC03@redtailco.xyz>",
+        "to": [to_email],
+        "subject": subject,
+        "html": html_content,
+    }
+    resend.Emails.send(params)
