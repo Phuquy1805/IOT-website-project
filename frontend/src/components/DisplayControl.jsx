@@ -6,10 +6,11 @@ export default function DisplayControl() {
   const [displaying, setDisplaying] = useState('');
 
   const handleSend = async () => {
-    if (!text.trim()) return;
+    const trimmed = text.trim();
+    if (!trimmed) return;
     try {
-      await sendLCDMessage(text.trim());
-      setDisplaying(text.trim());
+      await sendLCDMessage({ message: trimmed }); 
+      setDisplaying(trimmed);
       setText('');
     } catch (err) {
       console.error('Failed to send LCD message:', err);
