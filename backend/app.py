@@ -366,11 +366,43 @@ def handle_fingerprint_log(client, userdata, message):
 
     with app.app_context():
         if log_type == "match.success":
-            # parse cái payload_data lấy cái id vân tay
-            # query user_id trong bảng fingerprint ứng với id vân tay trên
-            # gửi tin nhắn "Người dùng {username} quét vân tay thành công vô webhook url trong bảng Webhook có user_id trên"
-            print()
-            
+            fingerprint_id = payload_data.get("id")
+            if fingerprint_id is not None:
+                fp = Fingerprint.query.get(int(fingerprint_id))
+                if fp:
+                    user = User.query.get(fp.user_id)
+                    wh = Webhook.query.filter_by(user_id=fp.user_id).first()
+                    if wh:
+                        ok, code, body = wh.notify(
+                            content=f"✅ Người dùng {user.username} quét vân tay thành công",
+                            event="fingerprint.match.success",
+                            fingerprint_id=fingerprint_id
+                        )
+                        if ok:
+                            app.logger.info(f"Sent webhook (match.success) to {wh.url}")
+                        else:
+                            app.logger.error(f"Webhook failed ({code}): {body}")
+            else:
+                app.logger.warning("match.success missing fingerprint id")
+
+        elif log_type == "match.fail":
+            fingerprint_id = payload_data.get("id")
+            wh = None
+            if fingerprint_id is not None:
+                fp = Fingerprint.query.get(int(fingerprint_id))
+                if fp:
+                    wh = Webhook.query.filter_by(user_id=fp.user_id).first()
+            if wh:
+                ok, code, body = wh.notify(
+                    content="❌ Có người quét vân tay nhưng thất bại",
+                    event="fingerprint.match.fail",
+                    fingerprint_id=fingerprint_id
+                )
+                if ok:
+                    app.logger.info(f"Sent webhook (match.fail) to {wh.url}")
+                else:
+                    app.logger.error(f"Webhook failed ({code}): {body}")
+                
         # 2) Handle enroll.success -> create/update fingerprint record
         elif log_type == "enroll.success" and cmd_id:
             original_command = db.session.get(Command, cmd_id)
