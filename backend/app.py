@@ -402,41 +402,8 @@ def handle_fingerprint_log(client, userdata, message):
                     app.logger.info(f"Sent webhook (match.fail) to {wh.url}")
                 else:
                     app.logger.error(f"Webhook failed ({code}): {body}")
-            elif log_type == "enroll.success" and cmd_id:
-                original_command = db.session.get(Command, cmd_id)
-                user = User.query.filter_by(id=original_command.user_id).first()
                 
-                send_fingerprint_action_email(user.email, user.username, "enroll") # send email when user enroll a fingerprint successfully
-                try:
-                    fingerprint_id = payload_data.get("id")
-                    if fingerprint_id is None:
-                        raise ValueError("payload.id missing for enroll.success")
-                    fingerprint_id = int(fingerprint_id)
-
-                    original_command = db.session.get(Command, cmd_id)
-                    if original_command:
-                        fp = db.session.get(Fingerprint, fingerprint_id)
-                        if fp is None:
-                            fp = Fingerprint(
-                                id=fingerprint_id,
-                                user_id=original_command.user_id,
-                                name=f"Vân tay #{fingerprint_id}",
-                                created_at=int(obj["created_at"]),
-                            )
-                            db.session.add(fp)
-                        else:
-                            fp.user_id    = original_command.user_id
-                            fp.name       = fp.name or f"Vân tay #{fingerprint_id}"
-                            fp.created_at = int(obj["created_at"])
-                        db.session.commit()
-                        app.logger.info(
-                            "Linked fingerprint ID %s to user ID %s",
-                            fingerprint_id, original_command.user_id
-                        )
-                except Exception as e:
-                    db.session.rollback()
-                    app.logger.error(f"Failed to create/update Fingerprint link: {e}")
-
+        # 2) Handle enroll.success -> create/update fingerprint record
         elif log_type == "enroll.success" and cmd_id:
             original_command = db.session.get(Command, cmd_id)
             user = User.query.filter_by(id=original_command.user_id).first()
