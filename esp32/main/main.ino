@@ -86,9 +86,11 @@ void callback(char *topic, byte *payload, unsigned int len)
   {
     handleFingerprintCommand(msg);
   }
-  else
-  {
-    // ignore other topics or add handlers later
+  else if (strcmp(topic, MQTT_TOPIC_LCD_COMMAND) == 0){
+    handleLCDCommand(msg);
+  }
+  else{
+    Serial.printf("Invalid MQTT topic");
   }
 }
 
@@ -141,9 +143,23 @@ void handleServoCommand(const String &jsonText)
                 sent ? "OK" : "FAIL");
 }
 
-// ==========================================
-// Handle fingerprint command (e.g., enroll)
-// ==========================================
+
+void handleLCDCommand(const String &msg)
+{
+  StaticJsonDocument<128> doc;
+  DeserializationError err = deserializeJson(doc, msg);
+
+  if (!err && doc.containsKey("text")) {
+    String text = doc["text"].as<String>();
+    lcd.printMessage(text); // In ra LCD, nếu dài sẽ scroll
+    Serial.printf("[LCD] Display message: %s\n", text.c_str());
+  } else {
+    // Nếu payload là plain text
+    lcd.printMessage(msg);
+    Serial.printf("[LCD] Display message: %s\n", msg.c_str());
+  }
+}
+
 void handleFingerprintCommand(const String &jsonText)
 {
   StaticJsonDocument<128> doc;
@@ -400,10 +416,12 @@ void loop()
   }
   mqttClient.loop();
   checkFingerprintScanner();
+  lcd.update();
 
-  // unsigned long now = millis();
-  // if (now - lastCapture >= captureInterval) {
-  //   lastCapture = now;
-  //   cameraCapture(mqttClient);
-  // }
+
+  unsigned long now = millis();
+  if (now - lastCapture >= captureInterval) {
+    lastCapture = now;
+    cameraCapture(mqttClient);
+  }
 }

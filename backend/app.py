@@ -1,10 +1,11 @@
 import os
 import json
+import secrets
 import requests
+import traceback
 from flask_cors import CORS
 from flask_mqtt import Mqtt
 from datetime import timedelta, datetime
-import secrets
 from dotenv import load_dotenv
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import select, func, CheckConstraint, ForeignKey, Index
@@ -12,8 +13,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import relationship
 from flask import Flask, request, jsonify, make_response
 from werkzeug.security import generate_password_hash, check_password_hash
-from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity, unset_jwt_cookies, set_access_cookies
-
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity, unset_jwt_cookies, set_access_cookies, verify_jwt_in_request
+from flask_jwt_extended.exceptions import NoAuthorizationError
 from utils.email import send_registration_email
 from utils.topic import topic
 
@@ -205,13 +206,7 @@ class Webhook(db.Model):
     def to_dict(self) -> dict:
         return {"id": self.id, "user_id": self.user_id, "url": self.url, "created_at": self.created_at}
     
-    @classmethod
     def notify(self, content: str, timeout: float = 5.0, **extra) -> tuple[bool, int, str]:
-        """
-        POST JSON to this webhook.
-        Returns (ok, status_code, text).
-        Usage: wh.notify("🔔 Servo opened") or wh.notify("...", event="servo", action="open")
-        """
         payload = {"content": content}
         if extra:
             payload.update(extra)
@@ -287,8 +282,6 @@ def handle_servo_log(client, userdata, message):
     cmd_id  = obj.get("command_id")
     rel_id  = obj.get("related_log_id")
 
-    
-    
     if cmd_id and rel_id:
         app.logger.warning(
             "servo/log violates parent rule: BOTH command_id=%s AND related_log_id=%s",
@@ -318,9 +311,14 @@ def handle_servo_log(client, userdata, message):
             original_command = db.session.get(Command, cmd_id)
             if original_command:
                 wh = Webhook.query.filter_by(user_id=original_command.user_id).first()
+                app.logger.error(f"Webhook found {wh.url}")
                 if wh:
+                    user = User.query.filter_by(id=original_command.user_id).first()
+                    username = user.username if user else "Unknown"
+                    tmp = "mở" if obj.get('payload') == "open" else "đóng"
+                                        
                     ok, code, body = wh.notify(
-                        content=f"🔔 Servo log: {obj.get('log_type')}",
+                        content=f"🔔 Cửa được {tmp} bởi {username}",
                         event="servo.log",
                         log_type=obj.get("log_type"),
                         description=obj.get("description"),
@@ -332,6 +330,10 @@ def handle_servo_log(client, userdata, message):
                         app.logger.info(f"Sent webhook to {wh.url} for log #{log.id}")
                     else:
                         app.logger.error(f"Webhook failed ({code}): {body}")
+            else:
+                app.logger.error(f"Can not found user id for command id {original_command}")
+        else:
+            app.logger.error(f"No cmd_id field in log")
 
 @mqtt.on_topic(MQTT_TOPIC_FINGERPRINT_LOG)
 def handle_fingerprint_log(client, userdata, message):
@@ -481,13 +483,37 @@ def servo_command():
         200 if published_ok else 500
     )
 
+@app.route('/api/lcd', methods=['POST'])
+@jwt_required()
+def api_lcd():
+    data = request.get_json()
+    message = data.get('message', '').strip()
+    if not message:
+        return jsonify({"error": "Message is required"}), 400
+    
+    user_id = get_jwt_identity()
+    cmd = Command(
+        created_at=int(datetime.utcnow().timestamp()),
+        user_id=user_id,
+        command_type='lcd.set',
+        topic=MQTT_TOPIC_LCD_COMMAND,
+        payload=message,
+        status='sent'
+    )
+    db.session.add(cmd)
+    db.session.commit()
+
+    # Publish to MQTT
+    mqtt.publish(MQTT_TOPIC_LCD_COMMAND, message)
+    return jsonify({"status": "ok", "message": message})
+
 # GET /api/fingerprints - Lấy danh sách tất cả vân tay
 @app.route('/api/fingerprints', methods=['GET'])
 @jwt_required()
 def get_all_fingerprints():
     fingerprints = Fingerprint.query.order_by(Fingerprint.id).all()
     count = len(fingerprints)
-    
+
     # Gói dữ liệu vào một object
     response_data = {
         "items": [fp.to_dict() for fp in fingerprints],
@@ -743,9 +769,9 @@ def chat_with_gemini():
         "Bạn sẽ trả lời các message theo yêu cầu nhưng kèm theo tính tình cảm và hẹn hò.\n" 
     )
     prompt_open_door = (
-        "Nếu message của người dùng là một câu ra lệnh mở cửa chẳng hạn như: 'Mở cửa', 'Mở cửa đi', "
-        "'Bạn hãy mở cửa đi', 'Vui lòng mở cửa', thì bạn chỉ cần trả lời lại rằng "
-        "'Tôi sẽ mở cửa! Vui lòng đợi trong giây lát!'\n"
+        "Nếu message của người dùng là một câu ra lệnh mở cửa chẳng hạn như: 'Mở/Đóng cửa', 'Mở/Đóng cửa đi', "
+        "'Bạn hãy mở/đóng cửa đi', 'Vui lòng mở/đóng cửa', thì bạn chỉ cần trả lời lại rằng "
+        "'Tôi sẽ mở/đóng cửa! Vui lòng đợi trong giây lát!'\n"
     )
     prompt_general = (
         "Nếu message người dùng không là một câu ra lệnh mở cửa thì bạn cần trả lời message đó theo điều kiện sau:\n"
@@ -768,12 +794,43 @@ def chat_with_gemini():
         res = requests.post(url, json=payload)
         res.raise_for_status()
         reply = res.json()['candidates'][0]['content']['parts'][0]['text']
+        action = None
+        if reply.startswith("Tôi sẽ mở cửa"):
+            action = "open"
+        elif reply.startswith("Tôi sẽ đóng cửa"):
+            action = "close"
+
+        if action:
+            try:
+                verify_jwt_in_request(optional=True)
+                user_id = get_jwt_identity()
+            except NoAuthorizationError:
+                user_id = None
+
+            if not user_id:
+                return jsonify({'error': 'Missing or invalid JWT token'}), 401
+
+            servo_url = request.host_url.rstrip('/') + '/api/servo'
+            app.logger.info(f"Gửi lệnh tới servo: {servo_url}")
+
+            servo_resp = requests.post(
+                servo_url,
+                json={"action": action},
+                cookies=request.cookies
+            )
+
+            if servo_resp.status_code != 200:
+                return jsonify({'reply': reply, 'servo_error': servo_resp.json()}), 500
+        
         return jsonify({'reply': reply})
+    
     except Exception as e:
+        app.logger.error(f"Chat error: {str(e)}")
+        app.logger.error(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
-# POST /api/profile/webhook
-@app.route('/api/profile/webhook', methods=['POST'])
+
+@app.route('/api/webhook', methods=['POST'])
 @jwt_required()
 def update_webhook():
     try:

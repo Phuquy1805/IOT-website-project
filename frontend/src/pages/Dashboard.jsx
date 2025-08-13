@@ -3,6 +3,8 @@ import LatestCaptureCard from '../components/LatestCaptureCard';
 import BigToggle from '../components/BigToggle';
 import { openDoor, closeDoor, registerFingerprint } from '../services/api';
 import ChatWidget from '../components/ChatWidget';
+import DisplayControl from '../components/DisplayControl';
+
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -37,7 +39,7 @@ export default function Dashboard() {
           </div>
 
           <div className="col-12 col-lg-4">
-            <div className="card shadow-sm p-4">
+            <div className="card shadow-sm p-4 mb-4">
               <h5 className="mb-3">Door Control</h5>
 
               <BigToggle
@@ -57,6 +59,8 @@ export default function Dashboard() {
                 <small className="text-muted d-block mt-2">wait&nbsp;3&nbsp;s…</small>
               )}
             </div>
+            {/* DisplayControl dưới Door Control */}
+            <DisplayControl />
           </div>
         </div>
       </div>

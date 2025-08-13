@@ -73,6 +73,12 @@ export function sendServoCommand(action) {
   return API.post('/api/servo', { action });
 }
 
+// ─── LCD Control ────────────────────────────────────────
+export function sendLCDMessage(message) {
+  return API.post('/api/lcd', { message });
+}
+
+// ─── Fingerprint Control ────────────────────────────────────────
 export function registerFingerprint() {
   return API.post('/api/fingerprint/register'); 
 }
