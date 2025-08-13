@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import time
 import secrets
 import requests
 import traceback
@@ -207,32 +208,55 @@ class Webhook(db.Model):
     def to_dict(self) -> dict:
         return {"id": self.id, "user_id": self.user_id, "url": self.url, "created_at": self.created_at}
     
-    def notify(self, content: str, timeout: float = 5.0, **extra) -> tuple[bool, int, str]:
+    def notify(self, content: str, timeout: float = 6.0, **extra) -> tuple[bool, int, str]:
+        
+        if not content:
+            content = "\u200b"
+        if len(content) > 2000:
+            content = content[:1990] + "…"
+
         payload = {"content": content}
+
+        # đưa metadata vào embeds để tránh Invalid Form Body
         if extra:
-            payload.update(extra)
-        try:
-            r = requests.post(self.url, json=payload, timeout=timeout)
-            return (r.ok, r.status_code, r.text)
-        except Exception as e:
-            return (False, 0, str(e))
-    
+            fields = []
+            title = str(extra.get("event", "Notification"))
+            for k, v in extra.items():
+                if v is None:
+                    continue
+                fields.append({"name": str(k), "value": str(v), "inline": False})
+            if fields:
+                payload["embeds"] = [{"title": title, "fields": fields[:25]}]
 
-
+        for attempt in (1, 2):
+            try:
+                r = requests.post(self.url, json=payload, timeout=(3, timeout))
+                if r.status_code == 429 and attempt == 1:
+                    try:
+                        delay = float(r.headers.get("Retry-After", "1"))
+                    except Exception:
+                        delay = 1.0
+                    time.sleep(min(delay, 2.0))
+                    continue
+                return (r.ok, r.status_code, r.text)
+            except requests.exceptions.Timeout as e:
+                if attempt == 1:
+                    continue
+                return (False, 0, f"timeout: {e}")
+            except Exception as e:
+                return (False, 0, str(e))
 # Create tables on startup
 def init_db():
     with app.app_context():
         # db.drop_all()  # REMEMBER TO DELETE THIS
         db.create_all()
 
-# Fired on successful connect
 @mqtt.on_connect()
 def handle_connect(client, userdata, flags, rc):
     mqtt.subscribe(MQTT_TOPIC_CAPTURE)
     mqtt.subscribe(MQTT_TOPIC_FINGERPRINT_LOG)
     mqtt.subscribe(MQTT_TOPIC_SERVO_LOG)
     mqtt.subscribe(MQTT_TOPIC_LCD_LOG)
-
 
 @mqtt.on_topic(MQTT_TOPIC_CAPTURE)
 def handle_capture_topic(client, userdata, message):
@@ -373,6 +397,7 @@ def handle_fingerprint_log(client, userdata, message):
                     user = User.query.get(fp.user_id)
                     wh = Webhook.query.filter_by(user_id=fp.user_id).first()
                     if wh:
+                        app.logger.info(f"Webhook retrieved for user {user.username}")
                         ok, code, body = wh.notify(
                             content=f"✅ Người dùng {user.username} quét vân tay thành công",
                             event="fingerprint.match.success",
@@ -386,29 +411,29 @@ def handle_fingerprint_log(client, userdata, message):
                 app.logger.warning("match.success missing fingerprint id")
 
         elif log_type == "match.fail":
+            # Nếu fail thì gửi cho TẤT CẢ webhook, tại vì quét fail thì trong log không có cmmd_id và id vân tay 
             fingerprint_id = payload_data.get("id")
-            wh = None
-            if fingerprint_id is not None:
-                fp = Fingerprint.query.get(int(fingerprint_id))
-                if fp:
-                    wh = Webhook.query.filter_by(user_id=fp.user_id).first()
-            if wh:
-                ok, code, body = wh.notify(
-                    content="❌ Có người quét vân tay nhưng thất bại",
-                    event="fingerprint.match.fail",
-                    fingerprint_id=fingerprint_id
-                )
-                if ok:
-                    app.logger.info(f"Sent webhook (match.fail) to {wh.url}")
-                else:
-                    app.logger.error(f"Webhook failed ({code}): {body}")
-                
-        # 2) Handle enroll.success -> create/update fingerprint record
+
+            webhooks = Webhook.query.order_by(Webhook.id.asc()).all()
+            if not webhooks:
+                app.logger.info("No webhooks configured; skipping match.fail notification")
+            else:
+                for wh in webhooks:
+                    ok, code, body = wh.notify(
+                        content="❌ Có người quét vân tay nhưng thất bại",
+                        event="fingerprint.match.fail",
+                        fingerprint_id=fingerprint_id
+                    )
+                    if ok:
+                        app.logger.info(f"Sent webhook (match.fail) to {wh.url}")
+                    else:
+                        app.logger.error(f"Webhook failed ({code}) to {wh.url}: {body}")
+ 
         elif log_type == "enroll.success" and cmd_id:
             original_command = db.session.get(Command, cmd_id)
             user = User.query.filter_by(id=original_command.user_id).first()
             
-            # send_fingerprint_action_email(user.email, user.username, "enroll") # send email when user enroll a fingerprint successfully
+            send_fingerprint_action_email(user.email, user.username, "enroll") # send email when user enroll a fingerprint successfully
             try:
                 fingerprint_id = payload_data.get("id")
                 if fingerprint_id is None:
@@ -443,7 +468,7 @@ def handle_fingerprint_log(client, userdata, message):
             
             original_command = db.session.get(Command, cmd_id)
             user = User.query.filter_by(id=original_command.user_id).first()
-            # send_fingerprint_action_email(user.email, user.username, "delete") # send email when user delete a fingerprint successfully
+            send_fingerprint_action_email(user.email, user.username, "delete") # send email when user delete a fingerprint successfully
             try:
                 original_command = db.session.get(Command, cmd_id)
                 user = User.query.filter_by(id=original_command.user_id).first()
@@ -479,8 +504,6 @@ def handle_fingerprint_log(client, userdata, message):
             db.session.rollback()
             app.logger.exception("DB insert failed for fingerprint log: %s", e)
 
-
-# POST /api/servo
 @app.route('/api/servo', methods=['POST'])
 @jwt_required()
 def servo_command():
@@ -530,6 +553,99 @@ def servo_command():
         200 if published_ok else 500
     )
 
+from sqlalchemy import or_, and_
+import json
+
+@app.route('/api/servo/last-open', methods=['GET'])
+@jwt_required()
+def api_servo_last_open():
+    # Lấy một tập ứng viên mới nhất gồm:
+    # - servo.status + payload == "open"  (mở bằng giao diện web)
+    # - match.success                    (mở bằng vân tay)
+    candidates = db.session.execute(
+        select(Log)
+        .where(
+            or_(
+                and_(Log.log_type == 'servo.status', Log.payload.in_(['open', '"open"'])),
+                Log.log_type == 'match.success'
+            )
+        )
+        .order_by(Log.created_at.desc(), Log.id.desc())
+        .limit(200)
+    ).scalars().all()
+
+    for log in candidates:
+        # Trường hợp mở bằng web: servo.status + payload=open
+        if log.log_type == 'servo.status':
+            payload_val = (str(log.payload) or '').strip('"').lower()
+            if payload_val != 'open':
+                continue
+            if not log.command_id:
+                continue
+
+            cmd = db.session.get(Command, int(log.command_id))
+            if not cmd or not cmd.user_id:
+                continue
+
+            user = cmd.user or db.session.get(User, int(cmd.user_id))
+            if not user:
+                continue
+
+            return jsonify({
+                "id": user.id,
+                "username": user.username,
+                "source": "web",
+                "log_id": log.id,
+                "created_at": log.created_at
+            }), 200
+
+        # Trường hợp mở bằng vân tay: match.success + payload chứa {"id": <fingerprint_id>, ...}
+        elif log.log_type == 'match.success':
+            fp_id = None
+            raw = log.payload
+
+            if isinstance(raw, dict):
+                fp_id = raw.get('id')
+            else:
+                data = {}
+                try:
+                    data = json.loads(raw) if raw else {}
+                except Exception:
+                    try:
+                        import ast
+                        data = ast.literal_eval(raw) if raw else {}
+                    except Exception:
+                        data = {}
+                if isinstance(data, dict):
+                    fp_id = data.get('id')
+
+            try:
+                fp_id = int(fp_id) if fp_id is not None else None
+            except Exception:
+                fp_id = None
+
+            if not fp_id:
+                continue
+
+            fp = db.session.get(Fingerprint, fp_id)
+            if not fp or not fp.user_id:
+                continue
+
+            user = db.session.get(User, int(fp.user_id))
+            if not user:
+                continue
+
+            return jsonify({
+                "id": user.id,
+                "username": user.username,
+                "source": "fingerprint",
+                "fingerprint_id": fp_id,
+                "log_id": log.id,
+                "created_at": log.created_at
+            }), 200
+
+    return jsonify(error="No open event found"), 404
+
 @app.route('/api/lcd', methods=['POST'])
 @jwt_required()
 def lcd_command():
@@ -554,7 +670,6 @@ def lcd_command():
     mqtt.publish(MQTT_TOPIC_LCD_COMMAND, message)
     return jsonify({"status": "ok", "message": message})
 
-# GET /api/fingerprints - Lấy danh sách tất cả vân tay
 @app.route('/api/fingerprints', methods=['GET'])
 @jwt_required()
 def get_all_fingerprints():
@@ -616,8 +731,6 @@ def fingerprint_register_command():
         200 if published_ok else 500
     )
 
-
-# Authentication routes
 @app.route('/api/register/send-otp', methods=['POST'])
 def register_send_otp():
     data = request.get_json() or {}
@@ -631,7 +744,6 @@ def register_send_otp():
     code = OTPRequest.create(form_email, db)
     send_registration_email(form_email, form_username ,code)
     return jsonify(message='OTP sent'), 200
-
 
 @app.route('/api/register/verify', methods=['POST'])
 def register_verify():
@@ -665,7 +777,6 @@ def register_verify():
 
     db.session.commit()
     return jsonify(message='Registration complete'), 201
-
 
 @app.route('/api/login', methods=['POST'])
 def login():
@@ -778,7 +889,6 @@ def list_captures():
         "start": start, "end": end, "limit": limit, "offset": offset
     }), 200
 
-# DELETE /api/fingerprints/<int:fingerprint_id> - Gửi lệnh xóa vân tay
 @app.route('/api/fingerprints/<int:fingerprint_id>', methods=['DELETE'])
 @jwt_required()
 def fingerprint_delete_command(fingerprint_id):
@@ -805,7 +915,6 @@ def fingerprint_delete_command(fingerprint_id):
 
     return jsonify(message="Delete command sent."), 200 if published_ok else 500
 
-
 @app.route('/api/chat', methods=['POST'])
 def chat_with_gemini():
     data = request.get_json()
@@ -813,7 +922,7 @@ def chat_with_gemini():
 
     prompt_intro = (
         "Bạn là trợ lý ảo thông minh và thân thiện của trang web điều khiển cửa thông minh vân tay từ xa. "
-        "Bạn sẽ trả lời các message theo yêu cầu nhưng kèm theo tính tình cảm.\n" 
+        "Bạn sẽ trả lời các message theo yêu cầu nhưng kèm theo tính tình cảm.\n"
     )
     prompt_open_door = (
         "Nếu message của người dùng là một câu ra lệnh mở cửa chẳng hạn như: 'Mở/Đóng cửa', 'Mở/Đóng cửa đi', "
@@ -830,13 +939,21 @@ def chat_with_gemini():
         "'Lấy ảnh ....', 'Xin ảnh ....', thì bạn chỉ cần trả lời lại rằng "
         "'Ảnh chụp nè: '\n"
     )
+    prompt_last_open = (
+        "Nếu message của người dùng hỏi ai mở cửa gần nhất như: 'Ai mở cửa gần nhất', "
+        "'Ai mở cửa gần đây nhất', 'Người cuối cùng mở cửa', 'User cuối cùng mở cửa' "
+        "thì bạn chỉ cần trả lời lại rằng 'Người mở cửa gần nhất:'.\n"
+    )
     prompt_general = (
         "Nếu message người dùng không là một câu ra lệnh mở cửa thì bạn cần trả lời message đó theo điều kiện sau:\n"
         "Điều kiện 1: Câu trả lời không được format theo định dạng như Latex, Markdown,... Chỉ là text thông thường ;\n"
         "Điều kiện 2: Trả lời ngắn gọn xúc tích không quá 200 từ ;\n"
     )
 
-    full_prompt = f"{prompt_intro}{prompt_open_door}{prompt_lcd}{prompt_capture}{prompt_general}Câu hỏi người dùng: \"{user_message}\""
+    full_prompt = (
+        f"{prompt_intro}{prompt_open_door}{prompt_lcd}{prompt_capture}"
+        f"{prompt_last_open}{prompt_general}Câu hỏi người dùng: \"{user_message}\""
+    )
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
     payload = {
@@ -855,8 +972,9 @@ def chat_with_gemini():
         action = None
         lcd_message = None
         capture_requested = False
+        last_open_requested = False
 
-        # Nhận diện mở cửa
+        # Nhận diện mở/đóng cửa
         if reply.lower().startswith("tôi sẽ mở cửa"):
             action = "open"
         elif reply.lower().startswith("tôi sẽ đóng cửa"):
@@ -876,7 +994,11 @@ def chat_with_gemini():
         elif reply.lower().startswith("ảnh chụp nè"):
             capture_requested = True
 
-        # Thực thi mở cửa
+        # Nhận diện yêu cầu người mở cửa gần nhất
+        elif reply.lower().startswith("người mở cửa gần nhất"):
+            last_open_requested = True
+
+        # Thực thi mở/đóng cửa
         if action:
             verify_jwt_in_request(optional=True)
             user_id = get_jwt_identity()
@@ -914,16 +1036,72 @@ def chat_with_gemini():
             cap_resp = requests.get(cap_url, cookies=request.cookies)
             if cap_resp.status_code == 200:
                 cap_data = cap_resp.json()
-                image_url = cap_data.get('url')  
+                image_url = cap_data.get('url')
                 if image_url:
-                    return jsonify({'reply': reply, 'image_url': image_url})
+                    return jsonify({'reply': reply, 'image_url': image_url}), 200
                 else:
                     return jsonify({'reply': reply, 'error': 'No image URL in capture'}), 500
             else:
                 return jsonify({'reply': reply, 'capture_error': cap_resp.json()}), 500
 
+        # Thực thi lấy người mở cửa gần nhất
+        if last_open_requested:
+            verify_jwt_in_request(optional=True)
+            user_id = get_jwt_identity()
+            if not user_id:
+                return jsonify({'error': 'Missing or invalid JWT token'}), 401
+
+            last_url = request.host_url.rstrip('/') + '/api/servo/last-open'
+            last_resp = requests.get(last_url, cookies=request.cookies)
+
+            if last_resp.status_code == 200:
+                info = last_resp.json()
+
+                username = info.get('username') or 'N/A'
+                uid = info.get('id')
+                source = info.get('source')
+                fp_id = info.get('fingerprint_id')
+                log_id = info.get('log_id')
+                created_at = info.get('created_at')
+
+                source_text = {'web': 'qua web', 'fingerprint': 'qua vân tay'}.get(source, None)
+
+                when_text = None
+                try:
+                    # created_at là epoch seconds (UTC)
+                    when_text = datetime.fromtimestamp(int(created_at)).strftime('%Y-%m-%d %H:%M:%S')
+                except Exception:
+                    pass
+
+                # Ghép câu tự nhiên
+                parts = [f"Người mở cửa gần nhất: {username}"]
+                if uid: parts.append(f"(ID {uid})")
+                if source_text: parts.append(f"{'(' + source_text + ')'}")
+                if fp_id: parts.append(f", vân tay #{fp_id}")
+                if when_text: parts.append(f", lúc {when_text}")
+                if log_id: parts.append(f", log #{log_id}")
+                msg = " ".join(parts).replace(") ,", "),").strip()
+                if not msg.endswith("."):
+                    msg += "."
+
+                return jsonify({'reply': msg}), 200
+
+            elif last_resp.status_code == 404:
+                return jsonify({'reply': "Chưa tìm thấy bản ghi mở cửa nào."}), 200
+            else:
+                try:
+                    err = last_resp.json()
+                except Exception:
+                    err = last_resp.text
+                return jsonify({
+                    'reply': "Không truy xuất được thông tin người mở cửa gần nhất.",
+                    'last_open_error': err
+                }), 500
+
+
+
         return jsonify({'reply': reply})
-    
+
     except Exception as e:
         app.logger.error(f"Chat error: {str(e)}")
         app.logger.error(traceback.format_exc())
