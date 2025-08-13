@@ -86,9 +86,31 @@ void callback(char *topic, byte *payload, unsigned int len)
   {
     handleFingerprintCommand(msg);
   }
-  else
+  else if (strcmp(topic, MQTT_TOPIC_LCD_COMMAND) == 0)
   {
-    // ignore other topics or add handlers later
+    handleLCDCommand(msg);
+  }else{
+    //Doing nothing ?????
+  }
+}
+
+// ==========================================
+// Handle LCD command
+// ========================================== 
+
+void handleLCDCommand(const String &msg)
+{
+  StaticJsonDocument<128> doc;
+  DeserializationError err = deserializeJson(doc, msg);
+
+  if (!err && doc.containsKey("text")) {
+    String text = doc["text"].as<String>();
+    lcd.printMessage(text); // In ra LCD, nếu dài sẽ scroll
+    Serial.printf("[LCD] Display message: %s\n", text.c_str());
+  } else {
+    // Nếu payload là plain text
+    lcd.printMessage(msg);
+    Serial.printf("[LCD] Display message: %s\n", msg.c_str());
   }
 }
 
@@ -406,4 +428,6 @@ void loop()
   //   lastCapture = now;
   //   cameraCapture(mqttClient);
   // }
+
+  lcd.update();
 }

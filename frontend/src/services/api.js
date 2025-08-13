@@ -96,6 +96,11 @@ export function chatWithGemini(message) {
   return API.post('/api/chat', { message });
 }
 
+// ─── LCD Control ────────────────────────────────────────
+export function sendLCDMessage(message) {
+  return API.post('/api/lcd', { message });
+}
+
 // convenience
 export function openDoor()  { return sendServoCommand('open'); }
 export function closeDoor() { return sendServoCommand('close'); }

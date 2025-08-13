@@ -830,6 +830,30 @@ def update_webhook():
     db.session.commit()
     return jsonify(message='Webhook saved successfully')
 
+@app.route('/api/lcd', methods=['POST'])
+@jwt_required()
+def api_lcd():
+    data = request.get_json()
+    message = data.get('message', '').strip()
+    if not message:
+        return jsonify({"error": "Message is required"}), 400
+    
+    user_id = get_jwt_identity()
+    cmd = Command(
+        created_at=int(datetime.utcnow().timestamp()),
+        user_id=user_id,
+        command_type='lcd.set',
+        topic=MQTT_TOPIC_LCD_COMMAND,
+        payload=message,
+        status='sent'
+    )
+    db.session.add(cmd)
+    db.session.commit()
+
+    # Publish to MQTT
+    mqtt.publish(MQTT_TOPIC_LCD_COMMAND, message)
+    return jsonify({"status": "ok", "message": message})
+
 if __name__ == '__main__':
     init_db()
     app.run(host='0.0.0.0', port=BACK_END_PORT, debug=True)
