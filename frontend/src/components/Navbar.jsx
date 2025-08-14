@@ -48,52 +48,18 @@ export default function Navbar() {
               </NavLink>
             </li>
 
-            {/* Activity dropdown */}
-            <li className={`nav-item dropdown ${activityActive ? 'active' : ''}`}>
-              <a
-                href="#"
-                className={`nav-link dropdown-toggle ${activityActive ? 'active' : ''}`}
-                id="activityDropdown"
-                role="button"
-                data-bs-toggle="dropdown"
-                data-bs-auto-close="outside"
-                aria-expanded="false"
-              >
-                Activity
-              </a>
-              <ul className="dropdown-menu dropdown-menu-dark shadow" aria-labelledby="activityDropdown">
-                <li>
-                  <NavLink className="dropdown-item d-flex align-items-start gap-2" to="/activity/statistics">
-                    <i className="bi bi-graph-up" aria-hidden="true"></i>
-                    <div>
-                      <div>Statistics</div>
-                      <small className="text-secondary">Charts & trends</small>
-                    </div>
-                  </NavLink>
-                </li>
-
-                <li>
-                  <NavLink className="dropdown-item d-flex align-items-start gap-2" to="/activity/captures">
-                    <i className="bi bi-camera" aria-hidden="true"></i>
-                    <div>
-                      <div>Captures</div>
-                      <small className="text-secondary">Photo timeline</small>
-                    </div>
-                  </NavLink>
-                </li>
-
-                <li>
-                  <NavLink className="dropdown-item d-flex align-items-start gap-2" to="/activity/fingerprints">
-                    <i className="bi bi-fingerprint" aria-hidden="true"></i>
-                    <div>
-                      <div>Fingerprints</div>
-                      <small className="text-secondary">Access records</small>
-                    </div>
-                  </NavLink>
-                </li>
-
-              </ul>
+            <li className="nav-item">
+              <NavLink className="nav-link" to="/fingerprint-manager">
+                Fingerprint Manager
+              </NavLink>
             </li>
+            
+            <li className="nav-item">
+              <NavLink className="nav-link" to="/captures">
+                Captures
+              </NavLink>
+            </li>
+
           </ul>
 
           <button className="btn btn-outline-light btn-sm" onClick={handleLogout}>

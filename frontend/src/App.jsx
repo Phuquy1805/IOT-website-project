@@ -53,29 +53,14 @@ export default function App() {
           />
 
           <Route
-            path="/activity/statistics"
-            element={
-              <ProtectedRoute>
-                <ActivityStatistics/>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/activity/captures"
+            path="/captures"
             element={
               <ProtectedRoute>
                 <ActivityCaptures/>
               </ProtectedRoute>
             }
           />
-          <Route
-            path="/activity/fingerprints"
-            element={
-              <ProtectedRoute>
-                <ActivityFingerprints/>
-              </ProtectedRoute>
-            }
-          />
+
           <Route
             path="/fingerprint-manager"
             element={
